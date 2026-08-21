@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><title>Excel Agent - Test Page</title>
+<meta charset='utf-8'>
+<style>
+  body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+  .card { background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  h1 { color: #333; }
+  button { background: #10A37F; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+  button:hover { background: #0c8566; }
+  pre { background: #f0f0f0; padding: 10px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Excel Agent Task Pane - Test & Debug</h1>
+
+  <div class='card'>
+    <h3>Test Connection</h3>
+    <button onclick='testConnection()'>Test Server</button>
+    <button onclick=
+'forceReload()
+>Force Reload Task Pane</button>
+    <button onclick=
+
+checkDebugInfo()
+>Check Debug Info</button>
+  </div>
+
+  <div class='card' id='result'></div>
+
+  <script>
+    const SERVER_URL = 'https://localhost:3000';
+    
+    function testConnection() {
+      fetch(SERVER_URL)
+        .then(r => r.text())
+        .then(data => document.getElementById('result').innerHTML = '<p style=
+color:green>✓ Server running (' + data.length + ' bytes)</p>')
+        .catch(e => document.getElementById('result').innerHTML = '<p style=color:red>✗ Server error: ' + e.message + '</p>');
+    }
+    
+    function forceReload() {
+      window.location.href = SERVER_URL + '/taskpane.html?v=' + new Date().getTime();
+    }
+    
+    function checkDebugInfo() {
+      var info = document.title || 'Title not set';
+      document.getElementById('result').innerHTML = '<p>Document title: <strong>' + info + '</strong></p>
+<p>URL params: <a href=https://localhost:3000/taskpane.html?name=TEST_WORKBOOK target=_blank>Try with name param</a></p>';
+    }
+  </script>
+</body></html>

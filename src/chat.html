@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<!-- saved from url=(0016)http://localhost -->
+<html lang="id">
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excel Agent</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --bg-tertiary: #3d3d3d;
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0a0;
+    --accent: #10A37F;
+    --accent-hover: #0d8a6b;
+    --border: #404040;
+}
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+}
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13px;
+}
+.logo-icon {
+    width: 22px; height: 22px;
+    background: var(--accent);
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: bold; font-size: 12px;
+}
+.header-btns { display: flex; gap: 4px; }
+.icon-btn {
+    background: none; border: none;
+    color: var(--text-secondary);
+    cursor: pointer; padding: 6px;
+    border-radius: 4px; font-size: 14px;
+}
+.icon-btn:hover { background-color: var(--bg-tertiary); color: var(--text-primary); }
+
+/* Welcome */
+.welcome {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 20px; text-align: center;
+}
+.welcome.hidden { display: none; }
+.welcome h2 { font-size: 16px; margin-bottom: 6px; }
+.welcome p { color: var(--text-secondary); font-size: 12px; margin-bottom: 20px; }
+.examples { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; max-width: 280px; }
+.example-card {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px; background: var(--bg-secondary);
+    border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer; font-size: 11px; text-align: left;
+}
+.example-card:hover { background: var(--bg-tertiary); border-color: var(--accent); }
+
+/* Chat */
+.chat-area {
+    flex: 1; overflow-y: auto; padding: 12px;
+    display: none; flex-direction: column; gap: 12px;
+}
+.chat-area.active { display: flex; }
+
+.msg { display: flex; gap: 10px; animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+.msg-avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 13px;
+}
+.msg.user .msg-avatar { background: var(--bg-tertiary); }
+.msg.assistant .msg-avatar { background: var(--accent); }
+.msg-body {
+    flex: 1; padding: 10px 14px; border-radius: 10px;
+    font-size: 13px; line-height: 1.5;
+}
+.msg.user .msg-body { background: var(--bg-secondary); }
+.msg.assistant .msg-body { background: var(--bg-primary); border: 1px solid var(--border); }
+.msg-body code {
+    background: var(--bg-tertiary); padding: 1px 5px;
+    border-radius: 3px; font-family: Consolas, monospace; font-size: 12px;
+}
+.msg-body pre {
+    background: var(--bg-tertiary); padding: 10px;
+    border-radius: 6px; overflow-x: auto; margin: 6px 0;
+    font-family: Consolas, monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-all;
+}
+.msg-body pre code { background: none; padding: 0; }
+.code-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 10px; background: var(--bg-tertiary);
+    border-radius: 6px 6px 0 0; font-size: 11px; color: var(--text-secondary);
+}
+.code-header + pre { border-radius: 0 0 6px 6px; margin-top: 0; }
+.copy-btn, .exec-btn {
+    background: none; border: none; color: var(--text-secondary);
+    cursor: pointer; font-size: 11px; padding: 3px 6px; border-radius: 3px;
+}
+.copy-btn:hover, .exec-btn:hover { background: var(--border); color: var(--text-primary); }
+.exec-btn { color: var(--accent); }
+
+/* Loading */
+.loading { display: none; align-items: center; gap: 8px; padding: 10px 14px; color: var(--text-secondary); font-size: 12px; }
+.loading.active { display: flex; }
+.dots span {
+    display: inline-block; width: 5px; height: 5px;
+    background: var(--text-secondary); border-radius: 50%;
+    margin: 0 2px; animation: bounce 1.4s infinite ease-in-out;
+}
+.dots span:nth-child(2) { animation-delay: 0.2s; }
+.dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
+
+/* Input */
+.input-area {
+    padding: 10px 14px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.input-wrap {
+    display: flex; align-items: flex-end; gap: 6px;
+    background: var(--bg-tertiary); border-radius: 10px; padding: 6px 10px;
+}
+#userInput {
+    flex: 1; background: none; border: none;
+    color: var(--text-primary); font-size: 13px;
+    font-family: inherit; resize: none;
+    max-height: 100px; line-height: 1.4;
+}
+#userInput:focus { outline: none; }
+#userInput::placeholder { color: var(--text-secondary); }
+.send-btn {
+    width: 32px; height: 32px; border-radius: 6px;
+    border: none; background: var(--accent); color: white;
+    cursor: pointer; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+}
+.send-btn:disabled { background: var(--bg-tertiary); color: var(--text-secondary); cursor: not-allowed; }
+.input-hint { text-align: center; font-size: 10px; color: var(--text-secondary); margin-top: 6px; }
+
+/* Modal */
+.modal {
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+}
+.modal.active { display: flex; }
+.modal-box {
+    background: var(--bg-secondary); border-radius: 10px;
+    width: 90%; max-width: 300px; overflow: hidden;
+}
+.modal-hdr {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px; border-bottom: 1px solid var(--border);
+}
+.modal-hdr h3 { font-size: 15px; }
+.modal-body { padding: 14px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.field input {
+    width: 100%; padding: 8px 10px;
+    background: var(--bg-tertiary); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-primary); font-size: 13px;
+}
+.field input:focus { outline: none; border-color: var(--accent); }
+.field .hint { font-size: 10px; color: var(--text-secondary); margin-top: 3px; }
+.btn-row { display: flex; gap: 6px; margin-top: 6px; }
+.btn-primary {
+    flex: 1; padding: 9px; background: var(--accent); color: white;
+    border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary {
+    flex: 1; padding: 9px; background: var(--bg-tertiary); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+.btn-secondary:hover { background: var(--border); }
+.status-msg {
+    padding: 7px 10px; border-radius: 5px; font-size: 12px; margin-bottom: 8px; display: none;
+}
+.status-msg.ok { display: block; background: rgba(16,163,127,0.15); color: #10A37F; }
+.status-msg.err { display: block; background: rgba(220,50,50,0.15); color: #f04040; }
+.status-msg.wait { display: block; background: rgba(255,165,0,0.15); color: #FFA500; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">AI</div>
+            <span>Excel Agent</span>
+        </div>
+        <div class="header-btns">
+            <button class="icon-btn" id="settingsBtn" title="Settings">&#9881;</button>
+        </div>
+    </div>
+
+    <div class="welcome" id="welcome">
+        <h2>Siap membantu!</h2>
+        <p>Ketik perintah bahasa Indonesia untuk mengontrol Excel</p>
+        <div class="examples">
+            <div class="example-card" data-prompt="Buat chart penjualan bulanan dari data di Sheet1">&#128202; Buat chart</div>
+            <div class="example-card" data-prompt="Format sel A1:F10 dengan warna biru dan tebal">&#127912; Format sel</div>
+            <div class="example-card" data-prompt="Ekspor data ke PDF">&#128196; Ekspor PDF</div>
+            <div class="example-card" data-prompt="Hitung rata-rata kolom B">&#128202; Hitung rata-rata</div>
+        </div>
+    </div>
+
+    <div class="chat-area" id="chatArea"></div>
+
+    <div class="loading" id="loading">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <span>Memproses...</span>
+    </div>
+
+    <div class="input-area">
+        <div class="input-wrap">
+            <textarea id="userInput" placeholder="Ketik perintah..." rows="1"></textarea>
+            <button class="send-btn" id="sendBtn" disabled>&#9654;</button>
+        </div>
+        <div class="input-hint">Enter kirim &bull; Shift+Enter baris baru</div>
+    </div>
+</div>
+
+<div class="modal" id="settingsModal">
+    <div class="modal-box">
+        <div class="modal-hdr">
+            <h3>Pengaturan</h3>
+            <button class="icon-btn" id="closeSettings">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="statusMsg" class="status-msg"></div>
+            <div class="field">
+                <label>API Endpoint</label>
+                <input type="text" id="cfgEndpoint" placeholder="https://provider.com/v1">
+                <div class="hint">Base URL atau full path. /chat/completions ditambah otomatis</div>
+            </div>
+            <div class="field">
+                <label>API Key</label>
+                <input type="password" id="cfgKey" placeholder="sk-...">
+            </div>
+            <div class="field">
+                <label>Model</label>
+                <input type="text" id="cfgModel" placeholder="gpt-4">
+                <div class="hint">Nama model sesuai provider</div>
+            </div>
+            <div class="btn-row">
+                <button class="btn-secondary" id="testBtn">Cek Koneksi</button>
+                <button class="btn-primary" id="saveBtn">Simpan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden element for VBA bridge -->
+<input type="hidden" id="vbaBridge" value="">
+
+<script>
+// IE11-compatible JavaScript
+var cfg = { endpoint: '', key: '', model: 'gpt-4' };
+var history = [];
+
+window.onload = function() {
+    loadCfg();
+    setupUI();
+};
+
+function loadCfg() {
+    try {
+        // Try to get from VBA via bridge element
+        var bridge = document.getElementById('vbaBridge');
+        if (bridge && bridge.getAttribute('data-cfg')) {
+            var d = JSON.parse(bridge.getAttribute('data-cfg'));
+            if (d.endpoint) cfg.endpoint = d.endpoint;
+            if (d.key) cfg.key = d.key;
+            if (d.model) cfg.model = d.model;
+            return;
+        }
+    } catch(e) {}
+    try {
+        var s = localStorage.getItem('ea_cfg');
+        if (s) {
+            var d = JSON.parse(s);
+            cfg.endpoint = d.endpoint || '';
+            cfg.key = d.key || '';
+            cfg.model = d.model || 'gpt-4';
+        }
+    } catch(e) {}
+}
+
+function saveCfg() {
+    try { localStorage.setItem('ea_cfg', JSON.stringify(cfg)); } catch(e) {}
+    // Also write to bridge for VBA to read
+    try {
+        var bridge = document.getElementById('vbaBridge');
+        bridge.value = JSON.stringify(cfg);
+    } catch(e) {}
+}
+
+function setupUI() {
+    var inp = document.getElementById('userInput');
+    var btn = document.getElementById('sendBtn');
+
+    inp.oninput = function() {
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 100) + 'px';
+        btn.disabled = !inp.value.trim();
+    };
+
+    inp.onkeydown = function(e) {
+        if (e.keyCode === 13 && !e.shiftKey) {
+            e.preventDefault();
+            if (inp.value.trim()) send();
+        }
+    };
+
+    btn.onclick = function() { send(); };
+
+    // Example cards
+    var cards = document.getElementsByClassName('example-card');
+    for (var i = 0; i < cards.length; i++) {
+        (function(card) {
+            card.onclick = function() {
+                inp.value = card.getAttribute('data-prompt');
+                btn.disabled = false;
+                send();
+            };
+        })(cards[i]);
+    }
+
+    // Settings
+    document.getElementById('settingsBtn').onclick = function() {
+        document.getElementById('settingsModal').className = 'modal active';
+        document.getElementById('cfgEndpoint').value = cfg.endpoint;
+        document.getElementById('cfgKey').value = cfg.key;
+        document.getElementById('cfgModel').value = cfg.model;
+        document.getElementById('statusMsg').className = 'status-msg';
+    };
+
+    document.getElementById('closeSettings').onclick = function() {
+        document.getElementById('settingsModal').className = 'modal';
+    };
+
+    document.getElementById('saveBtn').onclick = function() {
+        cfg.endpoint = document.getElementById('cfgEndpoint').value.trim();
+        cfg.key = document.getElementById('cfgKey').value.trim();
+        cfg.model = document.getElementById('cfgModel').value.trim();
+        saveCfg();
+        showStatus('Disimpan!', 'ok');
+        setTimeout(function() {
+            document.getElementById('settingsModal').className = 'modal';
+        }, 600);
+    };
+
+    document.getElementById('testBtn').onclick = function() {
+        var ep = document.getElementById('cfgEndpoint').value.trim();
+        var k = document.getElementById('cfgKey').value.trim();
+        var m = document.getElementById('cfgModel').value.trim();
+        if (!ep || !m) { showStatus('Isi Endpoint dan Model', 'err'); return; }
+        showStatus('Menghubungkan...', 'wait');
+        apiCall(ep, k, m, [{role:'user',content:'Hi'}], 5, function(ok, data) {
+            if (ok) showStatus('Berhasil terhubung!', 'ok');
+            else showStatus('Gagal: ' + data, 'err');
+        });
+    };
+}
+
+function showStatus(msg, type) {
+    var el = document.getElementById('statusMsg');
+    el.textContent = msg;
+    el.className = 'status-msg ' + type;
+}
+
+function send() {
+    var inp = document.getElementById('userInput');
+    var text = inp.value.trim();
+    if (!text) return;
+
+    addMsg('user', text);
+    history.push({role:'user', content:text});
+    inp.value = '';
+    inp.style.height = 'auto';
+    document.getElementById('sendBtn').disabled = true;
+    document.getElementById('welcome').className = 'welcome hidden';
+    document.getElementById('chatArea').className = 'chat-area active';
+    document.getElementById('loading').className = 'loading active';
+
+    if (!cfg.endpoint || !cfg.key) {
+        document.getElementById('loading').className = 'loading';
+        addMsg('assistant', 'Silakan atur API Key dan Endpoint di Settings (ikon gear).');
+        return;
+    }
+
+    var sys = 'Kamu adalah asisten AI untuk Microsoft Excel. '
+        + 'Bantu user dengan VBA code. '
+        + 'Saat diminta buat kode, berikan: 1) Penjelasan singkat 2) VBA code dalam ```vba ... ``` 3) Instruksi. '
+        + 'Respons selalu dalam bahasa Indonesia.';
+
+    var msgs = [{role:'system', content:sys}];
+    var slice = history.slice(-10);
+    for (var i = 0; i < slice.length; i++) msgs.push(slice[i]);
+
+    apiCall(cfg.endpoint, cfg.key, cfg.model, msgs, 2000, function(ok, data) {
+        document.getElementById('loading').className = 'loading';
+        if (ok) {
+            var content = data.choices[0].message.content;
+            addMsg('assistant', content);
+            history.push({role:'assistant', content:content});
+        } else {
+            addMsg('assistant', 'Error: ' + data);
+        }
+    });
+}
+
+function normalizeEndpoint(ep) {
+    if (!ep) return ep;
+    ep = ep.replace(/\/+$/, '');
+    // Already full path
+    if (ep.indexOf('/chat/completions') !== -1) return ep;
+    if (ep.indexOf('/completions') !== -1) return ep;
+    // Base URL or /v1 - append standard path
+    return ep + '/chat/completions';
+}
+
+function apiCall(endpoint, key, model, messages, maxTokens, cb) {
+    endpoint = normalizeEndpoint(endpoint);
+
+    var xhr;
+    try { xhr = new XMLHttpRequest(); } catch(e) {
+        try { xhr = new ActiveXObject('MSXML2.XMLHTTP'); } catch(e2) {
+            cb(false, 'No XMLHttpRequest'); return;
+        }
+    }
+
+    var payload = JSON.stringify({
+        model: model,
+        messages: messages,
+        max_tokens: maxTokens,
+        temperature: 0.7
+    });
+
+    xhr.open('POST', endpoint, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    if (key) xhr.setRequestHeader('Authorization', 'Bearer ' + key);
+
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    if (resp.choices && resp.choices.length > 0) {
+                        cb(true, resp);
+                    } else {
+                        cb(false, 'No choices in response');
+                    }
+                } catch(e) {
+                    cb(false, 'Parse error: ' + e.message);
+                }
+            } else {
+                var errMsg = 'HTTP ' + xhr.status;
+                if (xhr.status === 404) errMsg = 'HTTP 404 - endpoint tidak ditemukan: ' + endpoint;
+                try {
+                    var errData = JSON.parse(xhr.responseText);
+                    if (errData.error && errData.error.message) errMsg = errData.error.message;
+                } catch(e) {}
+                cb(false, errMsg);
+            }
+        }
+    };
+
+    xhr.onerror = function() { cb(false, 'Network error'); };
+
+    try {
+        xhr.send(payload);
+    } catch(e) {
+        cb(false, 'Send error: ' + e.message);
+    }
+}
+
+function addMsg(role, content) {
+    var area = document.getElementById('chatArea');
+    var div = document.createElement('div');
+    div.className = 'msg ' + role;
+    var avatar = role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+
+    div.innerHTML = '<div class="msg-avatar">' + avatar + '</div>'
+        + '<div class="msg-body">' + fmtMsg(content) + '</div>';
+
+    area.appendChild(div);
+    area.scrollTop = area.scrollHeight;
+}
+
+function fmtMsg(text) {
+    // Extract code blocks
+    var parts = [];
+    var re = /```(\w*)\n([\s\S]*?)```/g;
+    var last = 0;
+    var match;
+    while ((match = re.exec(text)) !== null) {
+        if (match.index > last) {
+            parts.push({type:'text', content: text.substring(last, match.index)});
+        }
+        parts.push({type:'code', lang: match[1] || 'vba', content: match[2]});
+        last = match.index + match[0].length;
+    }
+    if (last < text.length) {
+        parts.push({type:'text', content: text.substring(last)});
+    }
+
+    var html = '';
+    for (var i = 0; i < parts.length; i++) {
+        if (parts[i].type === 'text') {
+            var t = parts[i].content;
+            t = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+            t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            t = t.replace(/\n/g, '<br>');
+            html += t;
+        } else {
+            var c = parts[i].content;
+            c = c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            html += '<div class="code-header"><span>' + parts[i].lang.toUpperCase() + '</span>'
+                + '<span><button class="copy-btn" onclick="copyCode(this)">Salin</button>'
+                + ' <button class="exec-btn" onclick="execCode(this)">Jalankan</button></span></div>'
+                + '<pre><code>' + c + '</code></pre>';
+        }
+    }
+    return html;
+}
+
+function copyCode(btn) {
+    var code = btn.parentNode.parentNode.nextSibling;
+    var text = code.textContent || code.innerText;
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); btn.textContent = 'Tersalin!'; }
+    catch(e) { btn.textContent = 'Gagal'; }
+    document.body.removeChild(ta);
+    setTimeout(function() { btn.textContent = 'Salin'; }, 1500);
+}
+
+function execCode(btn) {
+    var code = btn.parentNode.parentNode.nextSibling;
+    var text = code.textContent || code.innerText;
+    // Signal VBA to execute this code via bridge
+    var bridge = document.getElementById('vbaBridge');
+    bridge.value = 'EXEC:' + text;
+    // Trigger navigation for VBA to catch
+    window.location.href = 'app:execvba';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Agent</title>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="taskpane.css?v=53">
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <rect width="24" height="24" rx="4" fill="#10A37F"/>
+                    <path d="M12 6L8 10H11V14H8L12 18V6Z" fill="white"/>
+                    <path d="M14 10H16V14H14" stroke="white" stroke-width="1.5"/>
+                </svg>
+                <span>Excel Agent</span>
+            </div>
+            <div class="header-actions">
+                <button id="clearHistoryBtn" class="icon-btn" title="Hapus riwayat percakapan">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M6 2h4a1 1 0 011 1v1h3v1.5H2V4h3V3a1 1 0 011-1zm.5 2h3V3.5h-3V4z"/>
+                        <path d="M3.5 6h9l-.7 7.6a1.4 1.4 0 01-1.4 1.3H5.6a1.4 1.4 0 01-1.4-1.3L3.5 6zm2.6 1.6v5.2h1.1V7.6H6.1zm2.7 0v5.2h1.1V7.6H8.8z"/>
+                    </svg>
+                </button>
+                <button id="settingsBtn" class="icon-btn" title="Settings">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 10a2 2 0 100-4 2 2 0 000 4z"/>
+                    <path d="M13.5 8c0-.2-.1-.4-.2-.5l-1-.8v-2l1-.8c.1-.1.2-.3.2-.5s-.1-.4-.2-.5l-1.5-1c-.1-.1-.3-.1-.5-.1h-2c-.2 0-.4.1-.5.2l-.8 1H5.5c-.2 0-.4.1-.5.2L3.5 3.5c-.1.1-.2.3-.2.5s.1.4.2.5l1 .8v2l-1 .8c-.1.1-.2.3-.2.5s.1.4.2.5l1.5 1c.1.1.3.2.5.2h2c.2 0 .4-.1.5-.2l.8-1h2c.2 0 .4-.1.5-.2l1.5-1c.1-.1.2-.3.2-.5zM5.5 9.5c-.8 0-1.5-.7-1.5-1.5s.7-1.5 1.5-1.5 1.5.7 1.5 1.5-.7 1.5-1.5 1.5z"/>
+                </svg>
+            </button>
+            </div>
+        </div>
+
+        <div id="workbookStatus" class="workbook-status hidden" role="status" aria-live="polite"></div>
+
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="welcome-screen">
+            <div class="welcome-icon">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                    <rect width="64" height="64" rx="12" fill="#10A37F"/>
+                    <path d="M32 16L20 28H28V36H20L32 48V16Z" fill="white"/>
+                    <path d="M36 28H44V36H36" stroke="white" stroke-width="2"/>
+                </svg>
+            </div>
+            <h2>Excel Agent, siap membantu</h2>
+            <p>Ketik perintah dalam bahasa Indonesia untuk mengontrol Excel</p>
+            
+            <div class="examples">
+                <div class="example-card" data-prompt="Buat chart penjualan bulanan dari data di Sheet1">
+                    <span class="icon">&#128202;</span>
+                    <span>Buat chart penjualan</span>
+                </div>
+                <div class="example-card" data-prompt="Format sel A1:F10 dengan warna biru dan tebal">
+                    <span class="icon">&#127912;</span>
+                    <span>Format sel</span>
+                </div>
+                <div class="example-card" data-prompt="Ekspor data ke PDF">
+                    <span class="icon">&#128196;</span>
+                    <span>Ekspor ke PDF</span>
+                </div>
+                <div class="example-card" data-prompt="Hitung rata-rata kolom B">
+                    <span class="icon">&#128202;</span>
+                    <span>Hitung rata-rata</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Messages -->
+        <div id="chatMessages" class="chat-messages"></div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="loading hidden">
+            <div class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+            <span>Memproses...</span>
+        </div>
+
+        <!-- Progress Text -->
+        <div id="progressText" class="progress-text hidden" role="status" aria-live="polite"></div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+            <div id="imagePreviewList" class="image-preview-list hidden" aria-live="polite"></div>
+            <div class="input-wrapper">
+                <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+                <button id="attachImageBtn" class="attach-btn" type="button" title="Lampirkan gambar" aria-label="Lampirkan gambar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                    </svg>
+                </button>
+                <textarea 
+                    id="userInput" 
+                    placeholder="Ketik perintah Anda di sini..."
+                    rows="1"
+                    disabled
+                ></textarea>
+                <button id="sendBtn" class="send-btn" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="input-footer">
+                <span class="hint">Paste atau lampirkan hingga 5 gambar</span>
+                <span id="taskpaneVersion" class="taskpane-version">v1.5.1</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Pengaturan</h3>
+                <button id="closeSettingsBtn" class="icon-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="apiKey">API Key</label>
+                    <input type="password" id="apiKey" placeholder="Masukkan API Key">
+                </div>
+                <div class="form-group">
+                    <label for="apiEndpoint">API Endpoint</label>
+                    <input type="text" id="apiEndpoint" placeholder="https://gateway.example.com/v1/chat/completions">
+                </div>
+                <div class="form-group">
+                    <label for="modelInput">Model</label>
+                    <input type="text" id="modelInput" placeholder="mis. gpt-4, claude-3-5-sonnet, llama-3.1-70b">
+                    <span class="field-hint">Ketik nama model sesuai gateway Anda</span>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-row" for="useOpencode">
+                        <input type="checkbox" id="useOpencode">
+                        <span>Kolaborasi dengan OpenCode (analisis mendalam)</span>
+                    </label>
+                    <span class="field-hint">Bila aktif, prompt dianalisis OpenCode; eksekusi tetap di Excel</span>
+                </div>
+                <div class="form-group">
+                    <label for="opencodeModel">Model OpenCode</label>
+                    <input type="text" id="opencodeModel" placeholder="9router/arap/claude-opus-5">
+                    <span class="field-hint">Format: provider/model (dari opencode models)</span>
+                </div>
+                <div id="settingsStatus" class="settings-status hidden"></div>
+                <div class="btn-row">
+                    <button id="testConnBtn" class="secondary-btn">Cek Koneksi</button>
+                    <button id="saveSettingsBtn" class="primary-btn">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="taskpane.js?v=53"></script>
+</body>
+</html>

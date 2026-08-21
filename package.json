@@ -1,0 +1,31 @@
+{
+  "name": "excel-agent",
+  "version": "1.0.0",
+  "description": "AI-powered Excel assistant with task pane",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "cert": "office-addin-dev-certs install --machine",
+    "validate": "office-addin-manifest validate manifest.xml",
+    "sideload": "office-addin-debugging start manifest.xml desktop --app excel",
+    "stop": "office-addin-debugging stop manifest.xml",
+    "test": "node --test tests/server.test.js tests/taskpane.test.js && python -m unittest discover -s tests -p \"test_*.py\" -v"
+  },
+  "dependencies": {
+    "selfsigned": "^2.4.1"
+  },
+  "devDependencies": {
+    "office-addin-debugging": "^6.1.2",
+    "office-addin-dev-certs": "^2.0.10",
+    "office-addin-manifest": "^2.1.6"
+  },
+  "keywords": [
+    "excel",
+    "ai",
+    "assistant",
+    "office-addin"
+  ],
+  "author": "Excel Agent",
+  "license": "MIT"
+}

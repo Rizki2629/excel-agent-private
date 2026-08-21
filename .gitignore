@@ -1,0 +1,41 @@
+# Node modules (large, can be reinstalled)
+node_modules/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.class
+*.so
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Build output
+build/
+dist/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temp files
+*.log
+tmp/
+temp/
+
+# Config files with secrets
+config.local.json
+secrets.json
+
+# Excel temp files
+~*.xlsm
+~*.xls
+*.tmp
+
+# Git
