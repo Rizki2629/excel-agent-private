@@ -128,7 +128,7 @@ echo.
 echo [7/7] Membuat shortcut Desktop & mendaftarkan ke Excel...
 call npx office-addin-debugging start manifest.xml desktop --app excel --no-debug >nul 2>&1
 
-powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Excel Agent Server.lnk'); $s.TargetPath = '%~dp0START_SERVER.bat'; $s.WorkingDirectory = '%~dp0'; $s.IconLocation = 'shell32.dll,138'; $s.Save()" >nul 2>&1
+powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Excel Agent Server.lnk'); $s.TargetPath = '%~dp0START.bat'; $s.WorkingDirectory = '%~dp0'; $s.IconLocation = 'shell32.dll,138'; $s.Save()" >nul 2>&1
 echo [OK] Shortcut 'Excel Agent Server' berhasil dibuat di Desktop.
 
 echo.
@@ -138,7 +138,7 @@ echo           🎉 SETUP BERHASIL! EXCEL AGENT SIAP DIGUNAKAN
 echo ====================================================================
 echo.
 echo CARA PENGGUNAAN SEHARI-HARI:
-echo   1. Klik shortcut "Excel Agent Server" di Desktop (atau START_SERVER.bat)
+echo   1. Klik shortcut "Excel Agent Server" di Desktop (atau START.bat)
 echo   2. Buka Microsoft Excel seperti biasa
 echo   3. Di Tab HOME (Beranda) Excel bagian kanan, klik tombol "Buka Asisten AI"
 echo.
