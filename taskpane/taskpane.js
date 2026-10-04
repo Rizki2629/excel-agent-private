@@ -42,6 +42,67 @@ var ALLOWED_IMAGE_TYPES = { 'image/png': true, 'image/jpeg': true, 'image/webp':
 var pendingImages = [];
 var activeTurnImages = [];
 
+// ---- Pembatalan proses (tombol Hentikan / tombol Esc) ----
+// cancelRequested: menandai giliran saat ini sudah dibatalkan user, sehingga
+// callback yang terlanjur berjalan tidak melanjutkan ke langkah berikutnya.
+var cancelRequested = false;
+// Daftar XHR yang sedang berjalan agar bisa di-abort seketika.
+var activeXhrs = [];
+
+function trackXhr(xhr) {
+    if (xhr) activeXhrs.push(xhr);
+    return xhr;
+}
+
+function untrackXhr(xhr) {
+    for (var i = activeXhrs.length - 1; i >= 0; i--) {
+        if (activeXhrs[i] === xhr) activeXhrs.splice(i, 1);
+    }
+}
+
+function abortAllXhrs() {
+    var list = activeXhrs.slice();
+    activeXhrs = [];
+    for (var i = 0; i < list.length; i++) {
+        try { list[i].abort(); } catch (e) { }
+    }
+    return list.length;
+}
+
+// Hentikan giliran agent yang sedang berjalan: putuskan koneksi AI,
+// minta server membunuh proses Python/VBA, lalu buka kunci UI.
+function stopProcessing(reason) {
+    if (!isProcessing) return false;
+    cancelRequested = true;
+    abortAllXhrs();
+
+    // Minta server menghentikan proses eksekusi yang masih hidup.
+    try {
+        var body = {};
+        if (workbookBinding && workbookBinding.workbookPath) {
+            body.workbookPath = workbookBinding.workbookPath;
+        }
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', SERVER + '/api/cancel', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify(body));
+    } catch (e) { /* server mungkin sudah tidak merespons */ }
+
+    isProcessing = false;
+    activeTurnImages = [];
+    try {
+        var loading = document.getElementById('loadingIndicator');
+        if (loading) loading.className = 'loading hidden';
+        var progress = document.getElementById('progressText');
+        if (progress) progress.className = 'progress-text hidden';
+    } catch (e) { }
+
+    addMessage('system', reason || 'Proses dihentikan oleh pengguna.');
+    saveHistory();
+    updateComposerState();
+    return true;
+}
+
 // Initialization
 var isInitialized = false;
 
@@ -58,6 +119,7 @@ function initApp() {
     isInitialized = true;
     
     setupEventListeners();
+    startHealthPolling();
     bindTaskPane(function (bound) {
         loadSettings(function () {
             if (bound) {
@@ -139,7 +201,8 @@ function saveSettings(done, apiKey) {
             model: settings.model,
             autoRun: settings.autoRun,
             useOpencode: settings.useOpencode,
-            opencodeModel: settings.opencodeModel
+            opencodeModel: settings.opencodeModel,
+            modelList: settings.modelList
         }));
     } catch (e) { }
 
@@ -150,6 +213,7 @@ function saveSettings(done, apiKey) {
         useOpencode: settings.useOpencode,
         opencodeModel: settings.opencodeModel
     };
+    if (Array.isArray(settings.modelList)) payload.modelList = settings.modelList;
     if (typeof apiKey === 'string' && apiKey) payload.apiKey = apiKey;
 
     var xhr = new XMLHttpRequest();
@@ -227,6 +291,41 @@ function setBindingBlocked(message) {
     document.getElementById('sendBtn').disabled = true;
 }
 
+// Dapatkan atau buat ID unik yang TERTANAM di dalam file Excel (Custom Property).
+// Karena tersimpan di dalam file, saat file di-copy/paste atau di-Save As dengan
+// nama lain, ID ini ikut terbawa sehingga riwayat chat otomatis muncul di file baru.
+var EXCEL_AGENT_ID_PROP = 'ExcelAgentId';
+
+function getOrCreateWorkbookId(done) {
+    if (typeof Excel === 'undefined' || !Excel.run) {
+        if (done) done(null);
+        return;
+    }
+    Excel.run(function (context) {
+        var custom = context.workbook.properties.custom;
+        var existing = custom.getItemOrNullObject(EXCEL_AGENT_ID_PROP);
+        existing.load('value, isNullObject');
+        return context.sync().then(function () {
+            if (existing && !existing.isNullObject && typeof existing.value === 'string' && existing.value.trim()) {
+                return existing.value.trim();
+            }
+            // Belum ada: buat ID acak permanen untuk file ini.
+            var newId = 'ea_' + createSessionId() + '_' + Date.now().toString(36);
+            try {
+                custom.add(EXCEL_AGENT_ID_PROP, newId);
+                return context.sync().then(function () { return newId; });
+            } catch (e) {
+                return newId;
+            }
+        });
+    }).then(function (id) {
+        if (done) done(id);
+    }).catch(function (e) {
+        // Fallback aman: jika permission custom properties dibatasi, tetap jalan tanpa ID.
+        if (done) done(null);
+    });
+}
+
 function bindTaskPane(done) {
     Office.context.document.getFilePropertiesAsync(function(result) {
         if (result.status !== Office.AsyncResultStatus.Succeeded) {
@@ -250,13 +349,23 @@ function bindTaskPane(done) {
         status.textContent = 'Target: ' + workbookBinding.workbookName;
         document.getElementById('userInput').disabled = false;
         document.getElementById('sendBtn').disabled = !document.getElementById('userInput').value.trim();
-        done(true);
+        // Baca atau tanam ID unik file (Custom Property) agar saat file diduplikat
+        // dengan nama berbeda, riwayat chat tetap bisa disambungkan.
+        getOrCreateWorkbookId(function (id) {
+            if (id && workbookBinding) {
+                workbookBinding.workbookId = id;
+            }
+            done(true);
+        });
     });
 }
 
 function loadHistory(done) {
     if (!workbookBinding) { if (done) done(); return; }
     var url = SERVER + '/api/history?workbookPath=' + encodeURIComponent(workbookBinding.workbookPath);
+    if (workbookBinding.workbookId) {
+        url += '&workbookId=' + encodeURIComponent(workbookBinding.workbookId);
+    }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.onreadystatechange = function() {
@@ -290,6 +399,7 @@ function flushHistorySave(done) {
     historySaveInFlight = true;
     xhrPost(SERVER + '/api/history', {
         workbookPath: workbookBinding.workbookPath,
+        workbookId: workbookBinding.workbookId || null,
         sessionId: workbookBinding.sessionId,
         revision: snapshot.revision,
         chatHistory: snapshot.chatHistory
@@ -314,6 +424,8 @@ function deleteHistory(done) {
         var xhr = new XMLHttpRequest();
         xhr.open('DELETE', SERVER + '/api/history', true);
         xhr.setRequestHeader('Content-Type', 'application/json');
+        var payload = { workbookPath: workbookBinding.workbookPath };
+        if (workbookBinding.workbookId) payload.workbookId = workbookBinding.workbookId;
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== 4) return;
             var ok = xhr.status >= 200 && xhr.status < 300;
@@ -332,7 +444,7 @@ function deleteHistory(done) {
             flushHistorySave();
             if (done) done(false);
         };
-        xhr.send(JSON.stringify({ workbookPath: workbookBinding.workbookPath }));
+        xhr.send(JSON.stringify(payload));
     }
     sendDelete();
 }
@@ -383,6 +495,22 @@ function setupEventListeners() {
     var closeSettingsBtn = document.getElementById('closeSettingsBtn');
     var saveSettingsBtn = document.getElementById('saveSettingsBtn');
     var testConnBtn = document.getElementById('testConnBtn');
+    var providerSelect = document.getElementById('providerSelect');
+    var providerName = document.getElementById('providerName');
+    var saveProviderBtn = document.getElementById('saveProviderBtn');
+    var deleteProviderBtn = document.getElementById('deleteProviderBtn');
+    var hermesProviderSelect = document.getElementById('hermesProviderSelect');
+    var refreshHermesBtn = document.getElementById('refreshHermesBtn');
+    var importHermesBtn = document.getElementById('importHermesBtn');
+    var hermesHint = document.getElementById('hermesHint');
+    var anthropicModelSelect = document.getElementById('anthropicModelSelect');
+    var refreshAnthropicBtn = document.getElementById('refreshAnthropicBtn');
+    var useAnthropicBtn = document.getElementById('useAnthropicBtn');
+    var anthropicHint = document.getElementById('anthropicHint');
+    var modelSelect = document.getElementById('modelSelect');
+    var addModelBtn = document.getElementById('addModelBtn');
+    var removeModelLink = document.getElementById('removeModelLink');
+    var toggleApiKeyBtn = document.getElementById('toggleApiKeyBtn');
     var attachImageBtn = document.getElementById('attachImageBtn');
     var imageInput = document.getElementById('imageInput');
 
@@ -393,8 +521,15 @@ function setupEventListeners() {
         updateComposerState();
     };
 
-    // Send message on Enter
+    // Send message on Enter, hentikan proses dengan Esc
     userInput.onkeydown = function (e) {
+        if (e.keyCode === 27) { // Esc
+            if (isProcessing) {
+                e.preventDefault();
+                stopProcessing('Proses dihentikan oleh pengguna (Esc).');
+            }
+            return;
+        }
         if (e.keyCode === 13 && !e.shiftKey) {
             e.preventDefault();
             if (userInput.value.trim() || pendingImages.length > 0) {
@@ -405,6 +540,65 @@ function setupEventListeners() {
 
     // Send button click
     sendBtn.onclick = function () { sendMessage(); };
+
+    // Tombol Hentikan pada indikator loading
+    var stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) {
+        stopBtn.onclick = function () {
+            stopProcessing('Proses dihentikan oleh pengguna.');
+        };
+    }
+
+    // Esc di mana pun dalam task pane (bukan hanya saat fokus di textarea).
+    // Modal pengaturan punya prioritas: Esc menutup modal dulu.
+    document.addEventListener('keydown', function (e) {
+        if (e.keyCode !== 27) return;
+        var modal = document.getElementById('settingsModal');
+        if (modal && modal.className.indexOf('hidden') === -1) {
+            modal.className = 'modal hidden';
+            e.preventDefault();
+            return;
+        }
+        if (isProcessing) {
+            e.preventDefault();
+            stopProcessing('Proses dihentikan oleh pengguna (Esc).');
+        }
+    });
+
+    // Connection badge & popover
+    var connectionBadge = document.getElementById('connectionBadge');
+    var connectionPopover = document.getElementById('connectionPopover');
+    var refreshHealthBtn = document.getElementById('refreshHealthBtn');
+
+    if (connectionBadge && connectionPopover) {
+        connectionBadge.onclick = function (e) {
+            e.stopPropagation();
+            var isHidden = connectionPopover.classList.contains('hidden');
+            if (isHidden) {
+                connectionPopover.classList.remove('hidden');
+                connectionBadge.setAttribute('aria-expanded', 'true');
+                checkSystemHealth(false);
+            } else {
+                connectionPopover.classList.add('hidden');
+                connectionBadge.setAttribute('aria-expanded', 'false');
+            }
+        };
+
+        document.addEventListener('click', function (e) {
+            if (!connectionPopover.contains(e.target) && e.target !== connectionBadge) {
+                connectionPopover.classList.add('hidden');
+                connectionBadge.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+
+    if (refreshHealthBtn) {
+        refreshHealthBtn.onclick = function (e) {
+            e.stopPropagation();
+            checkSystemHealth(true);
+        };
+    }
+
     if (attachImageBtn && imageInput) {
         attachImageBtn.onclick = function () { if (!bindingBlocked && workbookBinding) imageInput.click(); };
         imageInput.onchange = function () {
@@ -432,12 +626,504 @@ function setupEventListeners() {
     settingsBtn.onclick = function () {
         document.getElementById('settingsModal').className = 'modal';
         document.getElementById('apiKey').value = '';
+        setApiKeyVisible(false);
         document.getElementById('apiEndpoint').value = settings.apiEndpoint;
         document.getElementById('modelInput').value = settings.model;
         document.getElementById('useOpencode').checked = settings.useOpencode === true;
         document.getElementById('opencodeModel').value = settings.opencodeModel;
+        if (providerName) providerName.value = settings.activeProvider || '';
+        populateProviderDropdown();
+        populateModelDropdown();
         hideSettingsStatus();
     };
+
+    // ---- API Key show/hide toggle ----
+    function setApiKeyVisible(visible) {
+        var el = document.getElementById('apiKey');
+        if (!el) return;
+        el.type = visible ? 'text' : 'password';
+        if (toggleApiKeyBtn) toggleApiKeyBtn.textContent = visible ? 'Sembunyi' : 'Lihat';
+    }
+    if (toggleApiKeyBtn) {
+        toggleApiKeyBtn.onclick = function () {
+            var el = document.getElementById('apiKey');
+            setApiKeyVisible(el && el.type === 'password');
+        };
+    }
+
+    // ---- Daftar model: dipisah per provider ----
+    // Model yang ditampilkan HANYA milik provider yang sedang dipilih.
+    // Jika provider belum punya daftar sendiri, dipakai arsip modelList global
+    // sebagai cadangan agar daftar lama user tidak hilang.
+    function activeProviderModels() {
+        var name = settings.activeProvider || '';
+        var p = name && settings.providers ? settings.providers[name] : null;
+        if (p && Array.isArray(p.models) && p.models.length) return p.models.slice();
+        if (p) return p.model ? [p.model] : [];
+        // Mode manual (belum pilih provider): tampilkan arsip global.
+        return Array.isArray(settings.modelList) ? settings.modelList.slice() : [];
+    }
+
+    function populateModelDropdown() {
+        if (!modelSelect) return;
+        var list = activeProviderModels();
+        // Pastikan model aktif selalu ada di daftar tampilan
+        if (settings.model && list.indexOf(settings.model) === -1) list.unshift(settings.model);
+        modelSelect.innerHTML = '';
+        var optNew = document.createElement('option');
+        optNew.value = '';
+        optNew.textContent = settings.activeProvider
+            ? '\u2014 ' + list.length + ' model pada ' + settings.activeProvider + ' \u2014'
+            : '\u2014 Pilih provider dulu, atau ketik model \u2014';
+        modelSelect.appendChild(optNew);
+        for (var i = 0; i < list.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = list[i];
+            opt.textContent = list[i];
+            modelSelect.appendChild(opt);
+        }
+        modelSelect.value = settings.model && list.indexOf(settings.model) !== -1 ? settings.model : '';
+    }
+
+    // Pilih model dari dropdown -> isi input model (jadi aktif saat Simpan).
+    if (modelSelect) {
+        modelSelect.onchange = function () {
+            if (modelSelect.value) {
+                document.getElementById('modelInput').value = modelSelect.value;
+            }
+        };
+    }
+
+    // Tambah model ke daftar PROVIDER AKTIF (bukan daftar global).
+    if (addModelBtn) {
+        addModelBtn.onclick = function () {
+            var m = document.getElementById('modelInput').value.trim();
+            if (!m) { showSettingsStatus('Ketik nama model dulu.', 'error'); return; }
+            var prov = settings.activeProvider || '';
+            if (!prov) {
+                showSettingsStatus('Pilih provider dulu, agar model tersimpan di provider yang tepat.', 'error');
+                return;
+            }
+            var current = activeProviderModels();
+            if (current.indexOf(m) !== -1) {
+                showSettingsStatus('Model "' + m + '" sudah ada di provider ' + prov + '.', 'loading');
+                populateModelDropdown();
+                modelSelect.value = m;
+                return;
+            }
+            addModelBtn.disabled = true;
+            xhrPost(SERVER + '/api/providers/models', { name: prov, model: m }, function (status, data) {
+                addModelBtn.disabled = false;
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    if (data.config && data.config.providers) settings.providers = data.config.providers;
+                    populateModelDropdown();
+                    modelSelect.value = m;
+                    showSettingsStatus('Model "' + m + '" ditambahkan ke provider ' + prov + '.', 'success');
+                } else {
+                    showSettingsStatus('Gagal simpan model: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+    // Hapus model terpilih dari PROVIDER AKTIF saja.
+    if (removeModelLink) {
+        removeModelLink.onclick = function (e) {
+            if (e && e.preventDefault) e.preventDefault();
+            var m = modelSelect ? modelSelect.value : '';
+            if (!m) { showSettingsStatus('Pilih model dari daftar dulu untuk dihapus.', 'error'); return; }
+            var prov = settings.activeProvider || '';
+            if (!prov) { showSettingsStatus('Pilih provider dulu.', 'error'); return; }
+            xhrRequest('DELETE', SERVER + '/api/providers/models', { name: prov, model: m }, function (status, data) {
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    if (data.config && data.config.providers) settings.providers = data.config.providers;
+                    populateModelDropdown();
+                    showSettingsStatus('Model "' + m + '" dihapus dari provider ' + prov + '.', 'success');
+                } else {
+                    showSettingsStatus('Gagal hapus model: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+    // Isi dropdown provider dari settings.providers, tandai yang aktif.
+    function populateProviderDropdown() {
+        if (!providerSelect) return;
+        var providers = settings.providers || {};
+        var names = Object.keys(providers).sort();
+        providerSelect.innerHTML = '';
+        var optManual = document.createElement('option');
+        optManual.value = '';
+        optManual.textContent = '\u2014 Manual / Baru \u2014';
+        providerSelect.appendChild(optManual);
+        for (var i = 0; i < names.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = names[i];
+            var pv = providers[names[i]] || {};
+            var count = Array.isArray(pv.models) ? pv.models.length : 0;
+            opt.textContent = names[i] + ' (' + count + ' model' + (pv.hasKey ? '' : ', tanpa key') + ')';
+            providerSelect.appendChild(opt);
+        }
+        providerSelect.value = settings.activeProvider || '';
+    }
+
+    // Pilih provider dari dropdown -> aktifkan di server, muat field ke form.
+    if (providerSelect) {
+        providerSelect.onchange = function () {
+            var name = providerSelect.value;
+            if (!name) {
+                // "Manual / Baru": kosongkan form untuk membuat provider baru dari nol.
+                document.getElementById('apiKey').value = '';
+                setApiKeyVisible(false);
+                document.getElementById('apiEndpoint').value = '';
+                document.getElementById('modelInput').value = '';
+                document.getElementById('opencodeModel').value = '';
+                document.getElementById('useOpencode').checked = false;
+                if (providerName) { providerName.value = ''; providerName.focus(); }
+                settings.activeProvider = '';
+                settings.model = '';
+                populateModelDropdown();
+                if (modelSelect) modelSelect.value = '';
+                showSettingsStatus('Mode manual: isi form lalu "Simpan sbg Provider".', 'loading');
+                return;
+            }
+            showSettingsStatus('Mengaktifkan provider...', 'loading');
+            xhrPost(SERVER + '/api/providers/activate', { name: name }, function (status, data) {
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    // Sinkronkan settings lokal dari config server yang dikembalikan.
+                    var cfg = data.config || {};
+                    settings.apiEndpoint = cfg.apiEndpoint || '';
+                    settings.model = cfg.model || '';
+                    settings.useOpencode = cfg.useOpencode === true;
+                    if (cfg.opencodeModel) settings.opencodeModel = cfg.opencodeModel;
+                    settings.activeProvider = name;
+                    settings.hasApiKey = cfg.hasApiKey === true;
+                    if (cfg.providers) settings.providers = cfg.providers;
+                    // Perbarui form
+                    document.getElementById('apiKey').value = '';
+                    document.getElementById('apiEndpoint').value = settings.apiEndpoint;
+                    document.getElementById('modelInput').value = settings.model;
+                    document.getElementById('useOpencode').checked = settings.useOpencode;
+                    document.getElementById('opencodeModel').value = settings.opencodeModel || '';
+                    if (providerName) providerName.value = name; // isi nama agar mudah "simpan ulang" utk update
+                    populateModelDropdown();
+                    saveSettingsLocalOnly();
+                    showSettingsStatus('Provider "' + name + '" aktif' + (settings.hasApiKey ? '' : ' (belum ada API key)') + '.', settings.hasApiKey ? 'success' : 'error');
+                } else {
+                    showSettingsStatus('Gagal mengaktifkan: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+    // Simpan field form saat ini sebagai provider (minta nama).
+    if (saveProviderBtn) {
+        saveProviderBtn.onclick = function () {
+            var name = (providerName ? providerName.value : '').trim();
+            if (!name) {
+                showSettingsStatus('Isi "Nama provider" dulu di kolom atas.', 'error');
+                if (providerName) providerName.focus();
+                return;
+            }
+            var body = {
+                name: name,
+                apiEndpoint: document.getElementById('apiEndpoint').value.trim(),
+                model: document.getElementById('modelInput').value.trim(),
+                useOpencode: document.getElementById('useOpencode').checked === true,
+                opencodeModel: document.getElementById('opencodeModel').value.trim()
+            };
+            var typedKey = document.getElementById('apiKey').value.trim();
+            if (typedKey) body.apiKey = typedKey; // hanya kirim key bila diketik
+            saveProviderBtn.disabled = true;
+            showSettingsStatus('Menyimpan provider...', 'loading');
+            xhrPost(SERVER + '/api/providers', body, function (status, data) {
+                saveProviderBtn.disabled = false;
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    if (data.config && data.config.providers) settings.providers = data.config.providers;
+                    populateProviderDropdown();
+                    providerSelect.value = name;
+                    if (providerName) providerName.value = '';
+                    var hasKey = settings.providers[name] && settings.providers[name].hasKey;
+                    showSettingsStatus('Provider "' + name + '" tersimpan' + (hasKey ? '' : ' (tanpa API key \u2014 ketik key lalu simpan lagi)') + '.', hasKey ? 'success' : 'error');
+                } else {
+                    showSettingsStatus('Gagal simpan provider: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+    // Hapus provider terpilih. window.confirm diblokir di Office WebView,
+    // jadi pakai konfirmasi klik-dua-kali (klik pertama minta konfirmasi, kedua eksekusi).
+    if (deleteProviderBtn) {
+        var pendingDelete = null;
+        deleteProviderBtn.onclick = function () {
+            var name = providerSelect && providerSelect.value;
+            if (!name) { showSettingsStatus('Pilih provider tersimpan dulu untuk dihapus.', 'error'); return; }
+            if (pendingDelete !== name) {
+                // Klik pertama: minta konfirmasi
+                pendingDelete = name;
+                deleteProviderBtn.textContent = 'Klik lagi utk hapus';
+                showSettingsStatus('Klik "Hapus Provider" sekali lagi untuk konfirmasi hapus "' + name + '".', 'loading');
+                setTimeout(function () {
+                    pendingDelete = null;
+                    deleteProviderBtn.textContent = 'Hapus Provider';
+                }, 4000);
+                return;
+            }
+            // Klik kedua: eksekusi hapus
+            pendingDelete = null;
+            deleteProviderBtn.textContent = 'Hapus Provider';
+            deleteProviderBtn.disabled = true;
+            xhrRequest('DELETE', SERVER + '/api/providers', { name: name }, function (status, data) {
+                deleteProviderBtn.disabled = false;
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    if (data.config && data.config.providers) settings.providers = data.config.providers;
+                    if (settings.activeProvider === name) settings.activeProvider = '';
+                    populateProviderDropdown();
+                    showSettingsStatus('Provider "' + name + '" dihapus.', 'success');
+                } else {
+                    showSettingsStatus('Gagal hapus: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+
+    // ---- Integrasi Hermes: muat provider & model dari konfigurasi Hermes ----
+    var hermesCatalog = [];
+
+    function populateHermesDropdown() {
+        if (!hermesProviderSelect) return;
+        hermesProviderSelect.innerHTML = '';
+        var optEmpty = document.createElement('option');
+        optEmpty.value = '';
+        optEmpty.textContent = hermesCatalog.length
+            ? '\u2014 Pilih provider Hermes \u2014'
+            : '\u2014 Muat dari Hermes \u2014';
+        hermesProviderSelect.appendChild(optEmpty);
+        for (var i = 0; i < hermesCatalog.length; i++) {
+            var p = hermesCatalog[i];
+            var opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name + ' (' + p.modelCount + ' model' + (p.hasKey ? '' : ', tanpa key') + ')';
+            hermesProviderSelect.appendChild(opt);
+        }
+    }
+
+    function loadHermesProviders(done) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', SERVER + '/api/hermes/providers', true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var data = null;
+            try { data = JSON.parse(xhr.responseText); } catch (e) { }
+            if (xhr.status === 200 && data && data.ok) {
+                hermesCatalog = data.providers || [];
+                populateHermesDropdown();
+                if (hermesHint) {
+                    hermesHint.textContent = hermesCatalog.length
+                        ? 'Ditemukan ' + hermesCatalog.length + ' provider Hermes di ' + (data.hermesHome || 'komputer ini') + '.'
+                        : 'Konfigurasi Hermes terbaca tetapi belum ada provider.';
+                }
+                if (done) done(true);
+            } else {
+                hermesCatalog = [];
+                populateHermesDropdown();
+                if (hermesHint) {
+                    hermesHint.textContent = (data && data.error)
+                        ? data.error
+                        : 'Konfigurasi Hermes tidak ditemukan di komputer ini.';
+                }
+                if (done) done(false);
+            }
+        };
+        xhr.onerror = function () { if (done) done(false); };
+        xhr.send();
+    }
+
+    // Saat memilih provider Hermes, tampilkan model default-nya di kolom model.
+    if (hermesProviderSelect) {
+        hermesProviderSelect.onchange = function () {
+            var name = hermesProviderSelect.value;
+            if (!name) return;
+            for (var i = 0; i < hermesCatalog.length; i++) {
+                if (hermesCatalog[i].name === name) {
+                    var p = hermesCatalog[i];
+                    if (hermesHint) {
+                        hermesHint.textContent = p.modelCount + ' model tersedia. Model default: ' + (p.model || '-') + (p.hasKey ? '' : ' (provider ini tanpa API key di Hermes)');
+                    }
+                    break;
+                }
+            }
+        };
+    }
+
+    if (refreshHermesBtn) {
+        refreshHermesBtn.onclick = function () {
+            refreshHermesBtn.disabled = true;
+            showSettingsStatus('Membaca konfigurasi Hermes...', 'loading');
+            loadHermesProviders(function (ok) {
+                refreshHermesBtn.disabled = false;
+                showSettingsStatus(ok
+                    ? 'Daftar provider Hermes dimuat (' + hermesCatalog.length + ').'
+                    : 'Gagal membaca konfigurasi Hermes.', ok ? 'success' : 'error');
+            });
+        };
+    }
+
+    // Impor provider Hermes -> jadi provider Excel Agent + aktifkan + isi daftar model.
+    if (importHermesBtn) {
+        importHermesBtn.onclick = function () {
+            var name = hermesProviderSelect ? hermesProviderSelect.value : '';
+            if (!name) { showSettingsStatus('Pilih provider Hermes dulu dari dropdown.', 'error'); return; }
+            var chosenModel = document.getElementById('modelInput').value.trim();
+            importHermesBtn.disabled = true;
+            showSettingsStatus('Mengimpor provider Hermes "' + name + '"...', 'loading');
+            xhrPost(SERVER + '/api/hermes/import', { name: name, model: chosenModel }, function (status, data) {
+                importHermesBtn.disabled = false;
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    var cfg = data.config || {};
+                    settings.apiEndpoint = cfg.apiEndpoint || '';
+                    settings.model = cfg.model || data.model || '';
+                    settings.activeProvider = data.providerName || '';
+                    settings.hasApiKey = cfg.hasApiKey === true;
+                    if (Array.isArray(cfg.modelList)) settings.modelList = cfg.modelList;
+                    if (cfg.providers) settings.providers = cfg.providers;
+
+                    document.getElementById('apiKey').value = '';
+                    setApiKeyVisible(false);
+                    document.getElementById('apiEndpoint').value = settings.apiEndpoint;
+                    document.getElementById('modelInput').value = settings.model;
+                    populateModelDropdown();
+                    populateProviderDropdown();
+                    if (providerSelect) providerSelect.value = settings.activeProvider;
+                    saveSettingsLocalOnly();
+                    showSettingsStatus('Provider Hermes "' + name + '" aktif dengan ' + (data.models || []).length + ' model' + (settings.hasApiKey ? '' : ' (tanpa API key)') + '.', settings.hasApiKey ? 'success' : 'error');
+                    if (typeof checkSystemHealth === 'function') checkSystemHealth();
+                } else {
+                    showSettingsStatus('Gagal impor Hermes: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+    // Muat katalog Hermes sekali saat task pane siap.
+    loadHermesProviders();
+
+
+    // ---- Integrasi Anthropic: pakai login Claude Code yang sudah ada ----
+    var anthropicModels = [];
+
+    function populateAnthropicDropdown() {
+        if (!anthropicModelSelect) return;
+        anthropicModelSelect.innerHTML = '';
+        var opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = anthropicModels.length
+            ? '\u2014 Pilih model Claude \u2014'
+            : '\u2014 Cek login Anthropic \u2014';
+        anthropicModelSelect.appendChild(opt0);
+        for (var i = 0; i < anthropicModels.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = anthropicModels[i];
+            opt.textContent = anthropicModels[i];
+            anthropicModelSelect.appendChild(opt);
+        }
+    }
+
+    function loadAnthropicStatus(done) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', SERVER + '/api/anthropic/status', true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var data = null;
+            try { data = JSON.parse(xhr.responseText); } catch (e) { }
+            if (xhr.status === 200 && data && data.ok) {
+                anthropicModels = data.models || [];
+                populateAnthropicDropdown();
+                if (anthropicHint) {
+                    var mode = data.mode === 'oauth' ? 'login Claude Code (OAuth)' : 'API key Anthropic';
+                    var exp = '';
+                    if (data.expiresAt) {
+                        try { exp = ' \u2014 token berlaku s/d ' + new Date(data.expiresAt).toLocaleString(); } catch (e) { }
+                    }
+                    anthropicHint.textContent = 'Terhubung via ' + mode + '. ' + anthropicModels.length + ' model tersedia' + (data.modelsFromApi ? ' (dari API Anthropic)' : ' (daftar bawaan)') + '.' + exp;
+                }
+                if (done) done(true, data);
+            } else {
+                anthropicModels = [];
+                populateAnthropicDropdown();
+                if (anthropicHint) {
+                    anthropicHint.textContent = (data && data.error)
+                        ? data.error
+                        : 'Belum login Anthropic. Jalankan "claude login" di terminal, lalu klik Cek Login.';
+                }
+                if (done) done(false, data);
+            }
+        };
+        xhr.onerror = function () { if (done) done(false, null); };
+        xhr.send();
+    }
+
+    if (anthropicModelSelect) {
+        anthropicModelSelect.onchange = function () {
+            if (anthropicModelSelect.value) {
+                document.getElementById('modelInput').value = anthropicModelSelect.value;
+            }
+        };
+    }
+
+    if (refreshAnthropicBtn) {
+        refreshAnthropicBtn.onclick = function () {
+            refreshAnthropicBtn.disabled = true;
+            showSettingsStatus('Memeriksa login Anthropic...', 'loading');
+            loadAnthropicStatus(function (ok) {
+                refreshAnthropicBtn.disabled = false;
+                showSettingsStatus(ok
+                    ? 'Login Anthropic aktif (' + anthropicModels.length + ' model).'
+                    : 'Belum login Anthropic. Jalankan "claude login" dulu.', ok ? 'success' : 'error');
+            });
+        };
+    }
+
+    // Aktifkan Anthropic sebagai provider aktif memakai login yang ada.
+    if (useAnthropicBtn) {
+        useAnthropicBtn.onclick = function () {
+            var chosen = (anthropicModelSelect && anthropicModelSelect.value)
+                || document.getElementById('modelInput').value.trim();
+            useAnthropicBtn.disabled = true;
+            showSettingsStatus('Mengaktifkan Anthropic...', 'loading');
+            xhrPost(SERVER + '/api/anthropic/activate', { model: chosen }, function (status, data) {
+                useAnthropicBtn.disabled = false;
+                if (status >= 200 && status < 300 && data && data.ok) {
+                    var cfg = data.config || {};
+                    settings.apiEndpoint = cfg.apiEndpoint || '';
+                    settings.model = cfg.model || data.model || '';
+                    settings.activeProvider = data.providerName || '';
+                    settings.hasApiKey = cfg.hasApiKey === true;
+                    if (Array.isArray(cfg.modelList)) settings.modelList = cfg.modelList;
+                    if (cfg.providers) settings.providers = cfg.providers;
+
+                    document.getElementById('apiKey').value = '';
+                    setApiKeyVisible(false);
+                    document.getElementById('apiEndpoint').value = settings.apiEndpoint;
+                    document.getElementById('modelInput').value = settings.model;
+                    populateModelDropdown();
+                    populateProviderDropdown();
+                    if (providerSelect) providerSelect.value = settings.activeProvider;
+                    saveSettingsLocalOnly();
+                    showSettingsStatus('Anthropic aktif via ' + (data.mode === 'oauth' ? 'login Claude Code' : 'API key') + ' \u2014 model: ' + settings.model, 'success');
+                    if (typeof checkSystemHealth === 'function') checkSystemHealth();
+                } else {
+                    showSettingsStatus('Gagal aktifkan Anthropic: ' + ((data && data.error) || 'server error'), 'error');
+                }
+            });
+        };
+    }
+
+    // Cek status login Anthropic sekali saat task pane siap.
+    loadAnthropicStatus();
+
 
     closeSettingsBtn.onclick = function () {
         document.getElementById('settingsModal').className = 'modal hidden';
@@ -450,6 +1136,18 @@ function setupEventListeners() {
         settings.useOpencode = document.getElementById('useOpencode').checked === true;
         settings.opencodeModel = document.getElementById('opencodeModel').value.trim();
 
+        // Model aktif otomatis masuk daftar PROVIDER AKTIF supaya bisa dipilih lagi nanti.
+        // (modelList global tetap dibiarkan apa adanya sebagai arsip data lama.)
+        var provForSave = settings.activeProvider || '';
+        if (settings.model && provForSave && settings.providers && settings.providers[provForSave]) {
+            var pEntry = settings.providers[provForSave];
+            if (!Array.isArray(pEntry.models)) pEntry.models = [];
+            if (pEntry.models.indexOf(settings.model) === -1) {
+                pEntry.models.push(settings.model);
+                xhrPost(SERVER + '/api/providers/models', { name: provForSave, model: settings.model }, function () { });
+            }
+        }
+
         saveSettingsBtn.disabled = true;
         showSettingsStatus('Menyimpan...', 'loading');
 
@@ -457,6 +1155,7 @@ function setupEventListeners() {
             saveSettingsBtn.disabled = false;
             if (ok) {
                 showSettingsStatus('Tersimpan permanen. Aman ditutup.', 'success');
+                checkSystemHealth(false);
                 setTimeout(function () {
                     document.getElementById('settingsModal').className = 'modal hidden';
                 }, 900);
@@ -608,12 +1307,51 @@ function renderImagePreviews() {
 function xhrPost(url, data, callback, timeoutMs) {
     var xhr = new XMLHttpRequest();
     var completed = false;
+    trackXhr(xhr);
+    function finish(status, response) {
+        if (completed) return;
+        completed = true;
+        untrackXhr(xhr);
+        callback(status, response);
+    }
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    if (timeoutMs) {
+        xhr.timeout = timeoutMs;
+        xhr.ontimeout = function () {
+            finish(0, { error: { message: 'Request timeout setelah ' + Math.round(timeoutMs / 1000) + ' detik.' } });
+        };
+    }
+    xhr.onabort = function () {
+        finish(0, { cancelled: true, error: { message: 'Dibatalkan oleh pengguna.' } });
+    };
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4 && !completed) {
+            var response = null;
+            try {
+                response = JSON.parse(xhr.responseText);
+            } catch (e) {
+                response = { error: { message: xhr.statusText || 'Parse error' } };
+            }
+            finish(xhr.status, response);
+        }
+    };
+    xhr.onerror = function () {
+        finish(0, { error: { message: 'Network error' } });
+    };
+    xhr.send(JSON.stringify(data));
+}
+
+// Generic request dengan method bebas (mis. DELETE) + body JSON. Dipakai provider profiles.
+function xhrRequest(method, url, data, callback, timeoutMs) {
+    var xhr = new XMLHttpRequest();
+    var completed = false;
     function finish(status, response) {
         if (completed) return;
         completed = true;
         callback(status, response);
     }
-    xhr.open('POST', url, true);
+    xhr.open(method, url, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     if (timeoutMs) {
         xhr.timeout = timeoutMs;
@@ -635,7 +1373,22 @@ function xhrPost(url, data, callback, timeoutMs) {
     xhr.onerror = function () {
         finish(0, { error: { message: 'Network error' } });
     };
-    xhr.send(JSON.stringify(data));
+    xhr.send(data ? JSON.stringify(data) : null);
+}
+
+// Simpan cache setting non-secret ke localStorage saja (tanpa hit server).
+// Dipakai saat mengaktifkan provider: server sudah punya sumber kebenaran.
+function saveSettingsLocalOnly() {
+    try {
+        localStorage.setItem('excelAgentSettings', JSON.stringify({
+            apiEndpoint: settings.apiEndpoint,
+            model: settings.model,
+            autoRun: settings.autoRun,
+            useOpencode: settings.useOpencode,
+            opencodeModel: settings.opencodeModel,
+            activeProvider: settings.activeProvider
+        }));
+    } catch (e) { }
 }
 
 function formatApiError(status, data) {
@@ -759,6 +1512,131 @@ function hideSettingsStatus() {
     el.className = 'settings-status hidden';
 }
 
+// System Health & Connection Status
+var healthPollTimer = null;
+
+function checkSystemHealth(showLoadingState) {
+    var badge = document.getElementById('connectionBadge');
+    var badgeLabel = document.getElementById('badgeLabel');
+    var serverItem = document.getElementById('healthServerItem');
+    var serverDesc = document.getElementById('healthServerDesc');
+    var routerItem = document.getElementById('healthRouterItem');
+    var routerDesc = document.getElementById('healthRouterDesc');
+    var pythonItem = document.getElementById('healthPythonItem');
+    var pythonDesc = document.getElementById('healthPythonDesc');
+
+    if (!badge) return;
+
+    if (showLoadingState) {
+        badge.className = 'connection-badge status-loading';
+        if (badgeLabel) badgeLabel.textContent = 'Checking...';
+    }
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', SERVER + '/api/health', true);
+    xhr.timeout = 5000;
+
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+
+        if (xhr.status === 200) {
+            try {
+                var res = JSON.parse(xhr.responseText);
+                var isServerOk = res.server && res.server.status === 'online';
+                var isRouterOk = res.router && res.router.ok;
+                var isPythonOk = res.python && res.python.ok;
+
+                // Server Status UI
+                if (serverItem && serverDesc) {
+                    var sDot = serverItem.querySelector('.item-dot');
+                    if (sDot) sDot.className = 'item-dot dot-green';
+                    serverDesc.textContent = 'Port ' + (res.server.port || 3000) + ' (Online)';
+                }
+
+                // Router Status UI
+                if (routerItem && routerDesc) {
+                    var rDot = routerItem.querySelector('.item-dot');
+                    if (isRouterOk) {
+                        if (rDot) rDot.className = 'item-dot dot-green';
+                        var latencyStr = res.router.latencyMs ? ' (' + res.router.latencyMs + 'ms)' : '';
+                        var modelStr = res.router.activeModel ? ' \u2022 ' + res.router.activeModel : '';
+                        routerDesc.textContent = 'Online' + latencyStr + modelStr;
+                    } else {
+                        if (rDot) rDot.className = 'item-dot ' + (res.router.status === 'unconfigured' ? 'dot-yellow' : 'dot-red');
+                        routerDesc.textContent = res.router.message || (res.router.status === 'unconfigured' ? 'Belum dikonfigurasi' : 'Offline');
+                    }
+                }
+
+                // Python Status UI
+                if (pythonItem && pythonDesc) {
+                    var pDot = pythonItem.querySelector('.item-dot');
+                    if (isPythonOk) {
+                        if (pDot) pDot.className = 'item-dot ' + (res.python.hasWin32com ? 'dot-green' : 'dot-yellow');
+                        pythonDesc.textContent = res.python.hasWin32com ? 'win32com Ready' : 'Python OK (No win32com)';
+                    } else {
+                        if (pDot) pDot.className = 'item-dot dot-red';
+                        pythonDesc.textContent = res.python.message || 'Offline';
+                    }
+                }
+
+                // Main Badge state
+                if (isServerOk && isRouterOk && isPythonOk && (!res.python || res.python.hasWin32com)) {
+                    badge.className = 'connection-badge status-online';
+                    if (badgeLabel) badgeLabel.textContent = 'Ready';
+                    badge.title = 'Sistem Siap (Server, Router, Python COM Online)';
+                } else if (isServerOk && (isRouterOk || isPythonOk)) {
+                    badge.className = 'connection-badge status-degraded';
+                    if (badgeLabel) badgeLabel.textContent = !isRouterOk ? 'Router Offline' : 'COM Degraded';
+                    badge.title = 'Koneksi Terbatas (Klik untuk detail)';
+                } else {
+                    badge.className = 'connection-badge status-offline';
+                    if (badgeLabel) badgeLabel.textContent = 'Offline';
+                    badge.title = 'Layanan bermasalah (Klik untuk detail)';
+                }
+            } catch (e) {
+                badge.className = 'connection-badge status-offline';
+                if (badgeLabel) badgeLabel.textContent = 'Error';
+            }
+        } else {
+            // Server offline
+            badge.className = 'connection-badge status-offline';
+            if (badgeLabel) badgeLabel.textContent = 'Server Offline';
+            badge.title = 'Server lokal tidak merespons di ' + SERVER;
+
+            if (serverItem && serverDesc) {
+                var sDot = serverItem.querySelector('.item-dot');
+                if (sDot) sDot.className = 'item-dot dot-red';
+                serverDesc.textContent = 'Offline (Server mati)';
+            }
+            if (routerItem && routerDesc) {
+                var rDot = routerItem.querySelector('.item-dot');
+                if (rDot) rDot.className = 'item-dot dot-gray';
+                routerDesc.textContent = 'Tidak dapat diperiksa';
+            }
+            if (pythonItem && pythonDesc) {
+                var pDot = pythonItem.querySelector('.item-dot');
+                if (pDot) pDot.className = 'item-dot dot-gray';
+                pythonDesc.textContent = 'Tidak dapat diperiksa';
+            }
+        }
+    };
+
+    xhr.onerror = function () {
+        badge.className = 'connection-badge status-offline';
+        if (badgeLabel) badgeLabel.textContent = 'Server Offline';
+    };
+
+    xhr.send();
+}
+
+function startHealthPolling() {
+    if (healthPollTimer) clearInterval(healthPollTimer);
+    checkSystemHealth(true);
+    healthPollTimer = setInterval(function () {
+        checkSystemHealth(false);
+    }, 20000);
+}
+
 // Get cell address helper (row/col 0-based to Excel address)
 function getCellAddress(row, col) {
     var colLetter = '';
@@ -832,10 +1710,9 @@ function getWorkbookSchema(callback) {
         sheet.load("name");
         
         var usedRange = sheet.getUsedRangeOrNullObject();
-        usedRange.load("address, values, formulas, rowCount, columnCount");
-        
-        var headerRange = usedRange.isNullObject ? null : usedRange.getRow(0);
-        if (headerRange) headerRange.load("values");
+        // Hanya load dimensi dulu; values/formulas di-load terpisah setelah sync
+        // agar bisa membatasi ukuran data dan menghindari overload Excel.
+        usedRange.load("address, rowCount, columnCount");
         
         // Muat used range semua sheet untuk dimensi multi-sheet
         var sheetRanges = [];
@@ -852,7 +1729,7 @@ function getWorkbookSchema(callback) {
             // semua sheet, bukan hanya sheet aktif. Ini mengurangi halusinasi
             // nama kolom/sheet saat tugas melibatkan sheet lain.
             var headerRanges = [];
-            var maxHeaderSheets = Math.min(sheetRanges.length, 25);
+            var maxHeaderSheets = Math.min(sheetRanges.length, 15);
             for (var h = 0; h < sheetRanges.length; h++) {
                 var srh = sheetRanges[h];
                 if (h < maxHeaderSheets && srh && !srh.isNullObject && srh.rowCount > 0 && srh.columnCount > 0) {
@@ -862,6 +1739,21 @@ function getWorkbookSchema(callback) {
                 } else {
                     headerRanges.push(null);
                 }
+            }
+            // Load active sheet data: cap baris dan kolom supaya tidak overload
+            var activeValues = null;
+            var activeFormulas = null;
+            var activeHeader = null;
+            if (!usedRange.isNullObject && usedRange.rowCount > 0 && usedRange.columnCount > 0) {
+                var capRows = Math.min(usedRange.rowCount, 50);
+                var capCols = Math.min(usedRange.columnCount, 20);
+                activeValues = usedRange.getCell(0, 0).getResizedRange(capRows - 1, capCols - 1);
+                activeValues.load("values");
+                // Formulas: hanya cap area yang sama
+                activeFormulas = usedRange.getCell(0, 0).getResizedRange(capRows - 1, capCols - 1);
+                activeFormulas.load("formulas");
+                activeHeader = usedRange.getRow(0);
+                activeHeader.load("values");
             }
             return context.sync().then(function() {
                 var schema = {
@@ -896,37 +1788,38 @@ function getWorkbookSchema(callback) {
                     schema.activeSheet.rowCount = usedRange.rowCount;
                     schema.activeSheet.colCount = usedRange.columnCount;
 
-                    if (headerRange) {
-                        schema.activeSheet.headers = headerRange.values[0];
+                    if (activeHeader) {
+                        schema.activeSheet.headers = activeHeader.values[0];
                     }
 
-                    // Get column widths
+                    // Get column widths (approximate from header length)
                     var colWidths = {};
-                    var headerRow = headerRange ? headerRange.values[0] : null;
+                    var headerRow = activeHeader ? activeHeader.values[0] : null;
                     for (var c = 0; c < Math.min(usedRange.columnCount, 20); c++) {
                         var colLetter = getCellAddress(0, c).replace(/[0-9]/g, '');
-                        var colRange = sheet.getRange(colLetter + ":" + colLetter);
-                        colRange.load("columnWidth");
-                        // Note: columnWidth requires sync, but we're already in a sync block
-                        // We'll approximate based on header length for now
                         var headerVal = headerRow && headerRow[c] ? String(headerRow[c]) : '';
                         colWidths[colLetter] = headerVal.length > 0 ? Math.max(headerVal.length + 2, 8) : 8;
                     }
                     schema.activeSheet.columnWidths = colWidths;
 
-                    var sampleSize = Math.min(6, usedRange.rowCount);
-                    schema.activeSheet.sampleData = usedRange.values.slice(0, sampleSize);
+                    if (activeValues) {
+                        var sampleSize = Math.min(6, activeValues.values.length);
+                        schema.activeSheet.sampleData = activeValues.values.slice(0, sampleSize);
+                    }
 
-                    var formulas = [];
-                    for (var r = 0; r < Math.min(usedRange.rowCount, 50); r++) {
-                        for (var c2 = 0; c2 < Math.min(usedRange.columnCount, 20); c2++) {
-                            var f = usedRange.formulas[r][c2];
-                            if (typeof f === 'string' && f.charAt(0) === '=') {
-                                formulas.push({ cell: getCellAddress(r, c2), formula: f });
+                    if (activeFormulas) {
+                        var formulas = [];
+                        var fRows = activeFormulas.formulas;
+                        for (var r = 0; r < fRows.length; r++) {
+                            for (var c2 = 0; c2 < fRows[r].length; c2++) {
+                                var f = fRows[r][c2];
+                                if (typeof f === 'string' && f.charAt(0) === '=') {
+                                    formulas.push({ cell: getCellAddress(r, c2), formula: f });
+                                }
                             }
                         }
+                        schema.activeSheet.formulas = formulas.slice(0, 20);
                     }
-                    schema.activeSheet.formulas = formulas.slice(0, 20);
                 }
 
                 callback(null, schema);
@@ -963,6 +1856,10 @@ function sendMessage() {
 
     if (!message && pendingImages.length === 0) return;
     if (!message) message = 'Analisis gambar ini sebagai referensi workbook.';
+
+    // Giliran baru: bersihkan status pembatalan sebelumnya.
+    cancelRequested = false;
+    activeXhrs = [];
 
     isProcessing = true;
     assertBindingCurrent(function(bindingError) {
@@ -1009,15 +1906,10 @@ function sendBoundMessage(message) {
         updateComposerState();
         return;
     }
-    if (activeTurnImages.length && settings.useOpencode !== true) {
-        addMessage('assistant', 'Analisis gambar memerlukan opsi Kolaborasi dengan OpenCode di Pengaturan.');
-        document.getElementById('loadingIndicator').className = 'loading hidden';
-        isProcessing = false;
-        activeTurnImages = [];
-        updateComposerState();
-        return;
-    }
-
+    
+    // Gambar bisa dianalisis baik dengan OpenCode maupun mode proxy biasa
+    // (LLM vision-capable mendukung input image-base64 / multimodal)
+    
     // System prompt with Python win32com cheat sheet
     var systemPrompt = 
         '### IDENTITAS ###\n' +
@@ -1033,14 +1925,13 @@ function sendBoundMessage(message) {
         'dengan data yang tersedia di konteks. JANGAN mengarang data.\n\n' +
         
         '### ATURAN MUTLAK (JIKA DILANGGAR = GAGAL) ###\n' +
-        '1. ANDA BUKAN KONSULTAN. ANDA ADALAH AGENT EKSEKUSI. JANGAN HANYA MEMBERI ANALISIS ATAU RENCANA.\n' +
-        '2. UNTUK SETIAP PERMINTAAN USER, ANDA WAJIB MENULIS KODE YANG BISA DIEKSEKUSI.\n' +
-        '3. JANGAN PERNAH menolak, bilang "tidak bisa", atau suruh user manual.\n' +
-        '4. JANGAN PERNAH suruh user: "Salin kode", "Jalankan manual", "Tekan Alt+F11", dll.\n' +
-        '5. JANGAN MENULIS VBA atau Office.js. HANYA Python (win32com.client).\n' +
-         '6. WAJIB BUNGKUS KODE DENGAN TAG ```python ... ``` (huruf kecil).\n' +
-         '7. Jika tidak ada kode yang ditulis, ANDA GAGAL.\n' +
-         '8. Jika error terjadi, PERBAIKI kode lalu kirim ulang. JANGAN suruh user manual.\n' +
+        '1. Untuk permintaan AKSI / MANIPULASI WORKBOOK, Anda adalah AGENT EKSEKUSI: wajib menulis kode Python (win32com) di dalam tag ```python ... ```. JANGAN hanya memberi analisis.\n' +
+        '2. Untuk PERTANYAAN PENJELASAN / KONSULTASI ("apa itu...", "bagaimana cara...", "kenapa...", "apakah bisa..."), berikan jawaban jelas dan ringkas langsung dalam teks Bahasa Indonesia TANPA perlu kode Python.\n' +
+        '3. JANGAN PERNAH menolak atau bilang "tidak bisa" untuk tugas Excel yang didukung.\n' +
+        '4. JANGAN suruh user: "Salin kode", "Jalankan manual", "Tekan Alt+F11". Bila butuh kode, tulis dan sistem kami yang mengeksekusinya otomatis.\n' +
+        '5. Bila menulis kode, HANYA Python (win32com.client) - JANGAN VBA atau Office.js.\n' +
+        '6. WAJIB bungkus kode dengan tag ```python ... ``` (huruf kecil).\n' +
+        '7. Jika error terjadi pada kode, PERBAIKI kode lalu kirim ulang.\n' +
          '8a. Conditional Formatting COM pada Excel ini WAJIB memakai 4 argumen lengkap: import pythoncom lalu ' +
          'rng.FormatConditions.Add(2, 1, formula, pythoncom.Missing). Aktifkan sheet sebelum Add(). ' +
          'JANGAN gunakan named argument Formula1=, None, atau hanya 2/3 argumen. Formula harus diawali "=". ' +
@@ -1266,6 +2157,8 @@ function sendBoundMessage(message) {
     // (streaming + eksekusi). Jangan memakai AGENT_TURN_TIMEOUT_MS yang lebih
     // pendek karena bisa melepas kunci isProcessing saat turn masih berjalan.
     setTimeout(function() {
+        // Sudah dibatalkan user: jangan tampilkan pesan pengaman.
+        if (cancelRequested) return;
         if (isProcessing) {
             document.getElementById('loadingIndicator').className = 'loading hidden';
             addMessage('system', 'Proses memakan waktu sangat lama dan dihentikan oleh pengaman. Silakan coba lagi.');
@@ -1310,7 +2203,10 @@ function getSheetSnapshot(callback) {
         var sampleRanges = [];
 
         return context.sync().then(function() {
-            for (var i = 0; i < allSheets.items.length; i++) {
+            // Cap jumlah sheet yang di-scan: workbook dengan puluhan sheet
+            // bisa membuat Excel hang jika semua di-load sekaligus.
+            var maxSheets = Math.min(allSheets.items.length, 15);
+            for (var i = 0; i < maxSheets; i++) {
                 var sr = allSheets.items[i].getUsedRangeOrNullObject();
                 sr.load("rowCount, columnCount, address");
                 sheetRanges.push(sr);
@@ -1318,11 +2214,12 @@ function getSheetSnapshot(callback) {
             return context.sync();
         }).then(function() {
             // Ambil sampel nilai (pojok kiri-atas used range) tiap sheet.
+            // Cap ukuran sampel: 10 baris x 10 kolom cukup untuk deteksi perubahan.
             for (var j = 0; j < sheetRanges.length; j++) {
                 var srj = sheetRanges[j];
                 if (srj && !srj.isNullObject && srj.rowCount > 0 && srj.columnCount > 0) {
-                    var rows = Math.min(srj.rowCount, 40);
-                    var cols = Math.min(srj.columnCount, 20);
+                    var rows = Math.min(srj.rowCount, 10);
+                    var cols = Math.min(srj.columnCount, 10);
                     var smp = srj.getCell(0, 0).getResizedRange(rows - 1, cols - 1);
                     smp.load("values");
                     sampleRanges.push(smp);
@@ -1390,6 +2287,7 @@ function verifySheetChanged(callback) {
 
 // Execute code with retry and context refresh
 function executeCodeWithRetry(code, attempt, systemPrompt, contextMessage) {
+    if (cancelRequested) { isProcessing = false; return; }
     assertBindingCurrent(function(bindingError) {
         if (bindingError) {
             addMessage('system', bindingError.error);
@@ -1402,6 +2300,7 @@ function executeCodeWithRetry(code, attempt, systemPrompt, contextMessage) {
 }
 
 function executeBoundCodeWithRetry(code, attempt, systemPrompt, contextMessage) {
+    if (cancelRequested) { isProcessing = false; return; }
     document.getElementById('loadingIndicator').className = 'loading';
     console.log("[Agent] Eksekusi kode (percobaan " + (attempt + 1) + "):", code);
     
@@ -1517,6 +2416,7 @@ function executeBoundCodeWithRetry(code, attempt, systemPrompt, contextMessage) 
 
 // Execute multiple code blocks sequentially (multi-step)
 function executeMultiStep(codeBlocks, index, systemPrompt, contextMessage) {
+    if (cancelRequested) { isProcessing = false; return; }
     if (index > codeBlocks.length) {
         assertBindingCurrent(function(bindingError) {
             if (bindingError) {
@@ -1642,6 +2542,7 @@ function createStreamingMessage() {
 // berpikir - ini menghilangkan "Gateway timeout" pada jawaban panjang.
 function streamAgentTurn(apiEndpoint, payload, handlers) {
     var xhr = new XMLHttpRequest();
+    trackXhr(xhr);
     xhr.open('POST', SERVER + '/api/proxy', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.timeout = STREAM_TIMEOUT_MS;
@@ -1654,9 +2555,18 @@ function streamAgentTurn(apiEndpoint, payload, handlers) {
     function finish(ok, status, errData) {
         if (finished) return;
         finished = true;
+        untrackXhr(xhr);
+        // Dibatalkan user: jangan panggil onError agar tidak memicu fallback
+        // non-streaming yang akan menghidupkan kembali giliran.
+        if (cancelRequested) return;
         if (ok) handlers.onDone(fullContent);
         else handlers.onError(status, errData);
     }
+
+    xhr.onabort = function () {
+        finished = true;
+        untrackXhr(xhr);
+    };
 
     function processEvents(events) {
         for (var i = 0; i < events.length; i++) {
@@ -1738,7 +2648,28 @@ function streamAgentTurn(apiEndpoint, payload, handlers) {
 }
 
 // Proses balasan AI (dipakai jalur streaming maupun non-streaming).
+// ---- Deteksi intensi: aksi (butuh kode) vs tanya-cukup-jelaskan ----
+// Pertanyaan penjelasan ("apa bedanya", "kenapa", "jelaskan") sah dijawab
+// tanpa kode; jangan dipaksa retry yang membuat agent terasa stuck.
+var ACTION_HINTS = /(buat|ubah|ganti|isi|hapus|tulis|rapi|format|rapikan|masukkan|input|salin|pindahkan|urutkan|sortir|hitungkan|rekap|jumlahkan|gabungkan|rapikan|pasang|terapkan|jalankan|eksekusi|hapus duplikat|cari dan|tambah baris|tambah sheet|buat chart|buat grafik|buat rumus|isilah|ubahlah|buatkan|rapikan|koreksi|perbaiki|lengkapi|generate|create|write|modify|change|delete|insert|update|format|apply|run|execute|edit)\b/i;
+var EXPLAIN_HINTS = /(apa itu|apa bedanya|apa fungsi|apa yang|mengapa|kenapa|jelaskan|apa maksud|bagaimana cara|gimana caranya|cara kerja|berikan penjelasan|tolong jelaskan|apa perbedaan|apakah bisa|bisakah|mungkinkah|saya ingin tahu|what is|what's the difference|explain|why|how does|what does)\b/i;
+
+// Kembalikan true bila pesan user terakhir terlihat meminta AKSI pada workbook.
+function looksLikeActionRequest() {
+    var lastUser = '';
+    for (var i = chatHistory.length - 1; i >= 0; i--) {
+        if (chatHistory[i].role === 'user') { lastUser = chatHistory[i].content || ''; break; }
+    }
+    if (!lastUser) return true; // tanpa konteks: anggap butuh aksi (perilaku lama)
+    // Tanya-cukup-jelaskan menang telak: "jelaskan cara membuat pivot" = tanya.
+    if (EXPLAIN_HINTS.test(lastUser)) return false;
+    return ACTION_HINTS.test(lastUser);
+}
+// Ekspos ke global scope untuk pengujian unit (node vm context).
+try { if (typeof window !== 'undefined') window.looksLikeActionRequest = looksLikeActionRequest; } catch (e) { }
+
 function handleAgentResponse(content, systemPrompt, contextMessage, liveMessage) {
+    if (cancelRequested) { isProcessing = false; return; }
     document.getElementById('loadingIndicator').className = 'loading hidden';
 
     var wasExpectingAnswer = expectingAnswer;
@@ -1760,6 +2691,14 @@ function handleAgentResponse(content, systemPrompt, contextMessage, liveMessage)
             // Balasan tanpa kode adalah HASIL YANG BENAR untuk tugas analisis:
             // AI sedang memberikan jawaban akhir berdasarkan output eksekusi.
             console.log("[Agent] Jawaban akhir diterima (tugas analisis).");
+            isProcessing = false;
+            return;
+        }
+        // Pertanyaan penjelasan ("apa bedanya...", "kenapa...") sah dijawab
+        // tanpa kode. Dulu kasus ini ikut dipaksa retry 2x sehingga agent
+        // terasa stuck; sekarang jawaban teks langsung diterima.
+        if (!looksLikeActionRequest()) {
+            console.log("[Agent] Balasan tanpa kode untuk pertanyaan non-aksi - diterima.");
             isProcessing = false;
             return;
         }
@@ -1875,6 +2814,7 @@ function sendOpencodeRequest(payload, onSuccess, onFail, retried429) {
 }
 
 function runOpencodeAgentTurn(systemPrompt, contextMessage, attempt) {
+    if (cancelRequested) { isProcessing = false; return; }
     refreshSettingsFromServer(function() {
         runOpencodeAgentTurnInner(systemPrompt, contextMessage, attempt);
     });
@@ -1940,6 +2880,7 @@ function runOpencodeAgentTurnInner(systemPrompt, contextMessage, attempt) {
 
 // Satu putaran agent: minta kode ke AI, jalankan, retry otomatis bila error.
 function runAgentTurn(systemPrompt, contextMessage, attempt) {
+    if (cancelRequested) { isProcessing = false; return; }
     if (settings.useOpencode === true) {
         runOpencodeAgentTurn(systemPrompt, contextMessage, attempt);
         return;
@@ -1962,6 +2903,43 @@ function runAgentTurn(systemPrompt, contextMessage, attempt) {
                  'Semua blok kode dieksekusi dalam SATU sesi Python, variabel dari blok sebelumnya tersedia di blok berikutnya. ' +
                  'Gunakan ini untuk menghindari membaca ulang data yang sudah dibaca.'
     });
+
+    // Tambahkan lampiran gambar jika ada (vision support - multimodal)
+    // Format OpenAI compatible: [{type: "image_url", image_url: {url: "data:image/png;base64,..."}}, ...]
+    if (activeTurnImages.length > 0) {
+        // Image blocks sebagai bagian terakhir dari prompt user
+        var recentUserIdx = -1;
+        for (var i = messages.length - 1; i >= 0 && messages[i].role === 'user'; i--) {
+            recentUserIdx = i;
+            break;
+        }
+        
+        if (recentUserIdx >= 0 && messages[recentUserIdx].content) {
+            // Append images ke pesan user terakhir
+            var msgObj = messages[recentUserIdx];
+            msgObj.content = msgObj.content || '';
+            
+            // Check jika content string atau array
+            if (typeof msgObj.content === 'string') {
+                // Convert ke array untuk multimodal format
+                msgObj.content = [msgObj.content];
+            }
+            
+            // Tambahkan semua images ke array
+            activeTurnImages.forEach(function(img) {
+                msgObj.content.push({
+                    type: "image_url",
+                    image_url: {
+                        url: img.data  // base64 encoded image
+                    }
+                });
+            });
+            messages[recentUserIdx] = msgObj;
+        } else {
+            // Tidak ada user message last — skip gambar (shouldn't happen normally)
+            console.warn('[Agent] No user message found to attach images to');
+        }
+    }
 
     for (var i = 0; i < historySlice.length; i++) {
         messages.push(historySlice[i]);
@@ -2177,6 +3155,11 @@ function runPythonCode(code, callback) {
                 if (status >= 200 && status < 300 && data && data.ok) {
                     callback({ ok: true, message: data.message || 'OK', output: data.output || '' });
                 } else {
+                    // Dibatalkan user (ESC): tandai agar pemanggil tidak retry / lapor error.
+                    if (cancelRequested || (data && data.cancelled === true)) {
+                        callback({ ok: false, cancelled: true, error: 'Eksekusi dihentikan oleh pengguna.' });
+                        return;
+                    }
                     var errMsg = (data && data.error) ? data.error : ('HTTP ' + status);
                     callback({
                         ok: false,
@@ -2202,6 +3185,11 @@ function runPythonCode(code, callback) {
         if (status >= 200 && status < 300 && data && data.ok) {
             callback({ ok: true, message: data.message || 'OK', output: data.output || '' });
         } else {
+            // Dibatalkan user (ESC): tandai agar pemanggil tidak retry / lapor error.
+            if (cancelRequested || (data && data.cancelled === true)) {
+                callback({ ok: false, cancelled: true, error: 'Eksekusi dihentikan oleh pengguna.' });
+                return;
+            }
             var errMsg = (data && data.error) ? data.error : ('HTTP ' + status);
             callback({
                 ok: false,

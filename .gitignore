@@ -32,6 +32,15 @@ temp/
 # Config files with secrets
 config.local.json
 secrets.json
+auth.json
+
+# API keys / credentials (9router, dsb.)
+_9rkey.txt
+*key*.txt
+*.key
+
+# SSL certs (generated locally)
+*.pem
 
 # Excel temp files
 ~*.xlsm

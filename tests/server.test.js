@@ -16,6 +16,10 @@ const {
   workbookHistoryKey,
   publicSettings,
   resolveProxyApiKey,
+  saveProvider,
+  deleteProvider,
+  activateProvider,
+  sanitizeProviderName,
   MAX_REQUEST_BODY_BYTES,
   MAX_PENDING_COM,
   PROXY_TIMEOUT_MS,
@@ -140,6 +144,121 @@ test('settings POST mempertahankan API key saat incoming kosong', async () => {
   assert.deepEqual(saved, { model: 'baru' });
   assert.deepEqual(JSON.parse(res.body), { ok: true, config: { hasApiKey: true, model: 'baru' } });
 });
+
+test('publicSettings menyertakan daftar provider tanpa membocorkan API key', () => {
+  const out = publicSettings({
+    apiKey: 'aktif-secret',
+    providers: {
+      'Hallo Router': { apiEndpoint: 'https://api.hallorouter.com/v1', model: 'hr/hallo/gemini-3.1-pro', apiKey: 'rahasia-hallo' },
+      '9router lokal': { apiEndpoint: 'http://localhost:20128/v1', model: 'qd/ultimate', apiKey: '' }
+    }
+  });
+  // Key mentah TIDAK boleh muncul di mana pun
+  assert.equal(JSON.stringify(out).includes('rahasia-hallo'), false);
+  assert.equal(out.providers['Hallo Router'].hasKey, true);
+  assert.equal(out.providers['Hallo Router'].apiKey, undefined);
+  assert.equal(out.providers['9router lokal'].hasKey, false);
+  assert.equal(out.providers['Hallo Router'].model, 'hr/hallo/gemini-3.1-pro');
+});
+
+test('saveProvider menyimpan entry dan tidak menghapus key saat disimpan ulang tanpa key', () => {
+  // Test lewat handler agar memakai jalur nyata (read/write in-memory).
+  let config = { providers: {} };
+  const read = () => config;
+  const write = (p) => { config = Object.assign({}, config, p); return config; };
+  return (async () => {
+    const handler = createRequestHandler({ readConfig: read, writeConfig: write });
+    // 1. Simpan provider dengan key
+    let res = response();
+    await handler(request('POST', '/api/providers', {
+      name: 'Hallo', apiEndpoint: 'https://api.hallorouter.com/v1', model: 'hr/hallo/gemini-3.1-pro', apiKey: 'k-hallo-123'
+    }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(config.providers['Hallo'].apiKey, 'k-hallo-123');
+    // 2. Simpan ulang TANPA key (mis. hanya ganti model) — key lama harus bertahan
+    res = response();
+    await handler(request('POST', '/api/providers', { name: 'Hallo', model: 'hr/hallo/gpt-5.6-sol' }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(config.providers['Hallo'].apiKey, 'k-hallo-123');
+    assert.equal(config.providers['Hallo'].model, 'hr/hallo/gpt-5.6-sol');
+  })();
+});
+
+test('activateProvider menyalin endpoint/model/key provider ke setting aktif', async () => {
+  let config = {
+    apiKey: 'lama', apiEndpoint: 'http://old/v1', model: 'old-model', activeProvider: '',
+    providers: { 'Hallo': { apiEndpoint: 'https://api.hallorouter.com/v1', model: 'hr/hallo/gemini-3.1-pro', apiKey: 'k-hallo' } }
+  };
+  const handler = createRequestHandler({
+    readConfig: () => config,
+    writeConfig: (p) => { config = Object.assign({}, config, p); return config; }
+  });
+  const res = response();
+  await handler(request('POST', '/api/providers/activate', { name: 'Hallo' }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(config.apiEndpoint, 'https://api.hallorouter.com/v1');
+  assert.equal(config.model, 'hr/hallo/gemini-3.1-pro');
+  assert.equal(config.apiKey, 'k-hallo');
+  assert.equal(config.activeProvider, 'Hallo');
+  // Respons ke client tidak membocorkan key
+  assert.equal(res.body.includes('k-hallo'), false);
+});
+
+test('activateProvider mengembalikan 404 untuk provider tak dikenal', async () => {
+  let config = { providers: {} };
+  const handler = createRequestHandler({
+    readConfig: () => config,
+    writeConfig: (p) => { config = Object.assign({}, config, p); return config; }
+  });
+  const res = response();
+  await handler(request('POST', '/api/providers/activate', { name: 'TidakAda' }), res);
+  assert.equal(res.statusCode, 404);
+});
+
+test('deleteProvider menghapus entry dan mereset activeProvider bila cocok', async () => {
+  let config = {
+    activeProvider: 'Hallo',
+    providers: { 'Hallo': { apiEndpoint: 'e', model: 'm', apiKey: 'k' }, 'Lain': { apiEndpoint: 'e2', model: 'm2', apiKey: 'k2' } }
+  };
+  const handler = createRequestHandler({
+    readConfig: () => config,
+    writeConfig: (p) => { config = Object.assign({}, config, p); return config; }
+  });
+  const res = response();
+  await handler(request('DELETE', '/api/providers', { name: 'Hallo' }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(config.providers['Hallo'], undefined);
+  assert.equal(config.providers['Lain'].model, 'm2');
+  assert.equal(config.activeProvider, '');
+});
+
+test('sanitizeProviderName menolak nama kosong atau kepanjangan', () => {
+  assert.equal(sanitizeProviderName('  Hallo  '), 'Hallo');
+  assert.equal(sanitizeProviderName(''), '');
+  assert.equal(sanitizeProviderName('   '), '');
+  assert.equal(sanitizeProviderName('x'.repeat(61)), '');
+  assert.equal(sanitizeProviderName(123), '');
+});
+
+test('settings POST menyimpan modelList (daftar model bisa ganti-ganti)', async () => {
+  let config = { apiKey: 'k', model: 'm0', modelList: [] };
+  const handler = createRequestHandler({
+    readConfig: () => config,
+    writeConfig: (p) => { config = Object.assign({}, config, p); return config; }
+  });
+  const res = response();
+  await handler(request('POST', '/api/settings', {
+    model: 'stealth/ox-alpha',
+    modelList: ['stealth/ox-alpha', 'hr/hallo/gemini-3.1-pro', 'qd/ultimate']
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(config.modelList, ['stealth/ox-alpha', 'hr/hallo/gemini-3.1-pro', 'qd/ultimate']);
+  // modelList ikut dikembalikan ke client (bukan field rahasia)
+  const body = JSON.parse(res.body);
+  assert.deepEqual(body.config.modelList, ['stealth/ox-alpha', 'hr/hallo/gemini-3.1-pro', 'qd/ultimate']);
+});
+
+
 
 test('proxy memilih API key tersimpan saat request tidak membawa key', () => {
   assert.equal(resolveProxyApiKey(undefined, 'stored-secret'), 'stored-secret');
@@ -477,3 +596,159 @@ test('endpoint OpenCode memakai batas body gambar, meneruskan path, dan cleanup'
   assert.match(source, /runOpencode\(prompt, model, sessionId, dir, progressFile, cancelRef, preparedImages\.paths\)/);
   assert.match(source, /finally \{\s*preparedImages\.cleanup\(\);/);
 });
+
+test('health endpoint mengembalikan status server, router, dan python', async () => {
+  const handler = createRequestHandler();
+  const res = response();
+  await handler(request('GET', '/api/health'), res);
+  assert.equal(res.statusCode, 200);
+  const data = JSON.parse(res.body);
+  assert.equal(data.ok, true);
+  assert.equal(data.server.status, 'online');
+  assert.ok(typeof data.server.port === 'number');
+  assert.ok(data.router !== undefined);
+  assert.ok(data.python !== undefined);
+});
+
+test('checkRouterHealth menangani URL kosong atau tidak valid', async () => {
+  const { checkRouterHealth } = require('../server');
+  const resEmpty = await checkRouterHealth('');
+  assert.equal(resEmpty.ok, false);
+  assert.equal(resEmpty.status, 'unconfigured');
+
+  const resInvalid = await checkRouterHealth('bukan-url');
+  assert.equal(resInvalid.ok, false);
+  assert.equal(resInvalid.status, 'invalid_url');
+});
+
+// ---- Integrasi Hermes ----
+
+function writeHermesHome(configYaml, envText) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-test-'));
+  fs.writeFileSync(path.join(dir, 'config.yaml'), configYaml, 'utf8');
+  if (envText !== undefined) fs.writeFileSync(path.join(dir, '.env'), envText, 'utf8');
+  return dir;
+}
+
+test('hermes: endpoint chat completions dibentuk dari base_url', () => {
+  const h = require('../hermes_providers');
+  assert.equal(h.toChatCompletionsEndpoint('https://x.test/v1'), 'https://x.test/v1/chat/completions');
+  assert.equal(h.toChatCompletionsEndpoint('https://x.test/v1/'), 'https://x.test/v1/chat/completions');
+  assert.equal(h.toChatCompletionsEndpoint('https://x.test/v1/chat/completions'), 'https://x.test/v1/chat/completions');
+  assert.equal(h.toChatCompletionsEndpoint(''), '');
+});
+
+test('hermes: custom_providers dibaca lengkap dengan daftar model dan API key dari .env', () => {
+  const h = require('../hermes_providers');
+  const dir = writeHermesHome([
+    'model:',
+    '  default: FreeCombo',
+    '  provider: custom',
+    '  base_url: https://router.test/v1',
+    '  api_key: ${HERMES_ROUTER_KEY}',
+    'custom_providers:',
+    '  - name: RouterTest',
+    '    base_url: https://router.test/v1',
+    '    key_env: HERMES_ROUTER_KEY',
+    '    model: FreeCombo',
+    '    models:',
+    '      FreeCombo: {}',
+    '      ag/gemini-pro: {}'
+  ].join('\n'), 'HERMES_ROUTER_KEY=rahasia-123\n');
+
+  const result = h.readHermesProviders(dir);
+  assert.equal(result.ok, true);
+  assert.equal(result.providers.length, 1);
+  const p = result.providers[0];
+  assert.equal(p.name, 'RouterTest');
+  assert.equal(p.apiEndpoint, 'https://router.test/v1/chat/completions');
+  assert.equal(p.apiKey, 'rahasia-123');
+  assert.deepEqual(p.models, ['FreeCombo', 'ag/gemini-pro']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('hermes: fallback_providers ikut terbaca dan model aktif digabung ke provider ber-base_url sama', () => {
+  const h = require('../hermes_providers');
+  const dir = writeHermesHome([
+    'model:',
+    '  default: model-utama',
+    '  provider: custom',
+    '  base_url: https://router.test/v1',
+    '  api_key: ${K1}',
+    'custom_providers:',
+    '  - name: RouterTest',
+    '    base_url: https://router.test/v1',
+    '    key_env: K1',
+    '    model: lain',
+    'fallback_providers:',
+    '  - name: Lokal',
+    '    base_url: http://localhost:20128/v1',
+    '    api_key: sk-lokal',
+    '    model: qd/ultimate'
+  ].join('\n'), 'K1=key-satu\n');
+
+  const result = h.readHermesProviders(dir);
+  assert.equal(result.ok, true);
+  const names = result.providers.map(p => p.name);
+  assert.deepEqual(names, ['RouterTest', 'Lokal']);
+  // model aktif Hermes digabung ke provider dengan base_url sama, bukan provider baru
+  assert.equal(result.providers[0].model, 'model-utama');
+  assert.ok(result.providers[0].models.indexOf('model-utama') !== -1);
+  assert.equal(result.providers[1].apiKey, 'sk-lokal');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('hermes: publicHermesProviders tidak pernah membocorkan API key', () => {
+  const h = require('../hermes_providers');
+  const dir = writeHermesHome([
+    'custom_providers:',
+    '  - name: RouterTest',
+    '    base_url: https://router.test/v1',
+    '    key_env: K1',
+    '    model: m1'
+  ].join('\n'), 'K1=super-rahasia\n');
+
+  const publicView = h.publicHermesProviders(h.readHermesProviders(dir));
+  assert.equal(JSON.stringify(publicView).includes('super-rahasia'), false);
+  assert.equal(publicView.providers[0].hasKey, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('hermes: konfigurasi tidak ditemukan dilaporkan sebagai gagal, bukan crash', () => {
+  const h = require('../hermes_providers');
+  const result = h.readHermesProviders(path.join(os.tmpdir(), 'hermes-tidak-ada-' + Date.now()));
+  assert.equal(result.ok, false);
+  assert.ok(result.error);
+  assert.deepEqual(result.providers, []);
+});
+
+test('hermes: endpoint /api/hermes/providers melayani katalog tanpa key', async () => {
+  const handler = createRequestHandler();
+  const res = response();
+  await handler(request('GET', '/api/hermes/providers'), res);
+  assert.ok(res.statusCode === 200 || res.statusCode === 404);
+  const data = JSON.parse(res.body);
+  assert.ok(Array.isArray(data.providers));
+  for (const p of data.providers) {
+    assert.equal(p.apiKey, undefined);
+    assert.equal(typeof p.hasKey, 'boolean');
+  }
+});
+
+test('hermes: import menolak nama provider yang tidak ada', async () => {
+  const handler = createRequestHandler();
+  const res = response();
+  await handler(request('POST', '/api/hermes/import', { name: 'Provider-Tidak-Ada-xyz' }), res);
+  assert.ok(res.statusCode >= 400);
+  assert.equal(JSON.parse(res.body).ok, false);
+});
+
+test('taskpane menyediakan kontrol impor provider Hermes', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.html'), 'utf8');
+  assert.match(html, /id="hermesProviderSelect"/);
+  assert.match(html, /id="importHermesBtn"/);
+  assert.match(source, /\/api\/hermes\/providers/);
+  assert.match(source, /\/api\/hermes\/import/);
+});
+

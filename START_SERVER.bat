@@ -24,18 +24,11 @@ echo [OK] Node.js detected:
 node --version
 
 echo.
-echo [INFO] Server will run at:
-echo         https://localhost:3000/taskpane.html
-echo.
-echo [INFO] Press CTRL+C to stop the server
+echo [INFO] Server berjalan di https://localhost:3000
+echo [INFO] Add-in sudah terpasang permanen di Tab HOME (Beranda) Excel
+echo [INFO] Tekan CTRL+C untuk menghentikan server
 echo.
 echo ----------------------------------------
-echo Opening browser in 5 seconds...
-echo ----------------------------------------
-timeout /t 5 /nobreak >nul
-
-start https://localhost:3000/taskpane.html
-
 node server.js
 
 pause

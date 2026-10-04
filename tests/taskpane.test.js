@@ -129,7 +129,7 @@ test('binding OneDrive memakai nama workbook yang sudah didekode', () => {
 test('taskpane menampilkan versi di pojok kanan bawah', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.html'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.css'), 'utf8');
-  assert.match(html, /id="taskpaneVersion"[^>]*>v1\.5\.1</);
+  assert.match(html, /id="taskpaneVersion"[^>]*>v1\.6\.0</);
   assert.match(css, /\.taskpane-version[\s\S]*text-align:\s*right/);
 });
 
@@ -323,4 +323,27 @@ test('DELETE gagal melepas lock dan menyimpan snapshot terbaru', () => {
   assert.equal(requests.length, 2);
   assert.equal(requests[1].method, 'POST');
   assert.match(requests[1].body, /terbaru/);
+});
+
+test('taskpane: deteksi aksi vs pertanyaan penjelasan', () => {
+  const { context } = loadTaskpane();
+  // Tanya penjelasan -> looksLikeActionRequest harus false
+  context.chatHistory = [{ role: 'user', content: 'apa bedanya format xlsm dan xlsx?' }];
+  assert.equal(context.window.looksLikeActionRequest(), false);
+
+  context.chatHistory = [{ role: 'user', content: 'kenapa rumus ini menghasilkan #REF!?' }];
+  assert.equal(context.window.looksLikeActionRequest(), false);
+
+  context.chatHistory = [{ role: 'user', content: 'jelaskan cara kerja macro di sheet rekap' }];
+  assert.equal(context.window.looksLikeActionRequest(), false);
+
+  // Aksi -> looksLikeActionRequest harus true
+  context.chatHistory = [{ role: 'user', content: 'jumlahkan kolom D baris 5 sampai 20' }];
+  assert.equal(context.window.looksLikeActionRequest(), true);
+
+  context.chatHistory = [{ role: 'user', content: 'buat sheet baru bernama Analisis' }];
+  assert.equal(context.window.looksLikeActionRequest(), true);
+
+  context.chatHistory = [{ role: 'user', content: 'rapikan format tanggal di kolom B' }];
+  assert.equal(context.window.looksLikeActionRequest(), true);
 });

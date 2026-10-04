@@ -1,4 +1,7 @@
 import ntpath
+import os
+import shutil
+import tempfile
 from urllib.parse import unquote, urlparse
 
 
@@ -20,7 +23,9 @@ def normalize_windows_path(value):
         path_parts = unquote(parsed.path).split("/")
         if host == "d.docs.live.net" and len(path_parts) > 1:
             path_parts[1] = path_parts[1].lower()
-        return "https://" + host + "/".join(path_parts)
+        # Normalisasi: gabungkan host + path tanpa double slash
+        full_path = "/".join(p for p in path_parts if p)
+        return "https://" + host + "/" + full_path
     if value.lower().startswith("file:"):
         parsed = urlparse(value)
         path = unquote(parsed.path)
@@ -51,6 +56,26 @@ def validate_target(target):
     return result
 
 
+def _safe_dispatch(raw_or_dispatch_obj):
+    import win32com.client
+    import win32com.client.dynamic
+
+    try:
+        return win32com.client.Dispatch(raw_or_dispatch_obj)
+    except Exception:
+        try:
+            return win32com.client.dynamic.Dispatch(raw_or_dispatch_obj)
+        except Exception:
+            # Jika gen_py corrupt, bersihkan gen_py cache dan coba lagi
+            try:
+                gen_path = os.path.join(tempfile.gettempdir(), "gen_py")
+                if os.path.exists(gen_path):
+                    shutil.rmtree(gen_path, ignore_errors=True)
+                return win32com.client.dynamic.Dispatch(raw_or_dispatch_obj)
+            except Exception:
+                return None
+
+
 def iter_excel_applications():
     import pythoncom
     import win32com.client
@@ -75,14 +100,31 @@ def iter_excel_applications():
         moniker = monikers[0]
         try:
             running = rot.GetObject(moniker)
-            obj = win32com.client.Dispatch(running.QueryInterface(pythoncom.IID_IDispatch))
-            app = obj if getattr(obj, "Name", "") == "Microsoft Excel" else obj.Application
+            raw = running.QueryInterface(pythoncom.IID_IDispatch)
+            obj = _safe_dispatch(raw)
+            if obj is None:
+                continue
+            app = obj if getattr(obj, "Name", "") == "Microsoft Excel" else getattr(obj, "Application", None)
+            if app is None:
+                continue
             hwnd = int(app.Hwnd)
             if hwnd not in seen:
                 seen.add(hwnd)
                 yield app
         except Exception:
             continue
+
+    # Fallback jika ROT tidak memuat Excel (timing / single instance aktif)
+    if not seen:
+        try:
+            active_app = _safe_dispatch(win32com.client.GetActiveObject("Excel.Application"))
+            if active_app is not None:
+                hwnd = int(active_app.Hwnd)
+                if hwnd not in seen:
+                    seen.add(hwnd)
+                    yield active_app
+        except Exception:
+            pass
 
 
 def _workbooks(application):
@@ -110,18 +152,38 @@ def _workbooks(application):
 def resolve_workbook(target, applications=None):
     target = validate_target(target)
     matches = []
+    name_matches = []
+    target_norm_path = target["workbookPath"].lower()
+    target_norm_name = target["workbookName"].strip().lower()
+
     for application in applications if applications is not None else iter_excel_applications():
         for workbook in _workbooks(application):
             try:
-                if normalize_windows_path(str(workbook.FullName)) == target["workbookPath"]:
+                wb_full = normalize_windows_path(str(workbook.FullName)).lower()
+                wb_name = str(getattr(workbook, "Name", "")).strip().lower()
+                if wb_full == target_norm_path:
                     matches.append((application, workbook))
+                elif target_norm_name and (
+                    wb_name == target_norm_name
+                    or wb_full.endswith("/" + target_norm_name)
+                    or wb_full.endswith("\\" + target_norm_name)
+                ):
+                    name_matches.append((application, workbook))
             except Exception:
                 continue
-    if not matches:
-        raise TargetWorkbookError("Workbook target tidak ditemukan. Buka ulang task pane pada workbook tersebut.")
-    if len(matches) != 1:
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
         raise TargetWorkbookError("Workbook target ditemukan lebih dari satu kali. Tutup salinan duplikat.")
-    return matches[0]
+
+    # Fallback ke pencocokan nama file jika path OneDrive sync vs web URL sedikit berbeda
+    if len(name_matches) == 1:
+        return name_matches[0]
+    if len(name_matches) > 1:
+        raise TargetWorkbookError("Workbook target ditemukan lebih dari satu kali. Tutup salinan duplikat.")
+
+    raise TargetWorkbookError("Workbook target tidak ditemukan. Buka ulang task pane pada workbook tersebut.")
 
 
 def assert_same_workbook(workbook, normalized_path):
@@ -129,5 +191,17 @@ def assert_same_workbook(workbook, normalized_path):
         current = normalize_windows_path(str(workbook.FullName))
     except Exception as exc:
         raise TargetWorkbookError("Workbook target sudah ditutup.") from exc
-    if current != normalized_path:
+    if current.lower() != normalized_path.lower():
+        # Fallback: jika nama file tetap sama (misal URL OneDrive berubah saat AutoSave)
+        try:
+            current_name = str(getattr(workbook, "Name", "")).strip().lower()
+            target_name = (
+                unquote(urlparse(normalized_path).path).rsplit("/", 1)[-1].lower()
+                if normalized_path.lower().startswith("https://")
+                else ntpath.basename(normalized_path).lower()
+            )
+            if current_name and current_name == target_name:
+                return
+        except Exception:
+            pass
         raise TargetWorkbookError("Identitas workbook target berubah. Buka ulang task pane.")

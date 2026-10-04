@@ -13,7 +13,7 @@
     <Description DefaultValue="Asisten AI untuk Excel. Chat dalam bahasa Indonesia untuk mengontrol Excel."/>
     <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
     <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-80.png"/>
-    <SupportUrl DefaultValue="https://localhost:3000/taskpane.html"/>
+    <SupportUrl DefaultValue="https://localhost:3000/taskpane.html?v=20260820"/>
 
     <AppDomains>
         <AppDomain>https://localhost:3000</AppDomain>
@@ -30,7 +30,7 @@
     </Requirements>
 
     <DefaultSettings>
-        <SourceLocation DefaultValue="https://localhost:3000/taskpane.html"/>
+        <SourceLocation DefaultValue="https://localhost:3000/taskpane.html?v=20260820"/>
     </DefaultSettings>
 
     <Permissions>ReadWriteDocument</Permissions>
@@ -83,8 +83,8 @@
                 <bt:Image id="Icon.80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
             </bt:Images>
             <bt:Urls>
-                <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
-                <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://localhost:3000/taskpane.html"/>
+                <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html?v=20260820"/>
+                <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://localhost:3000/taskpane.html?v=20260820"/>
             </bt:Urls>
             <bt:ShortStrings>
                 <bt:String id="GetStarted.Title" DefaultValue="Excel Agent siap digunakan!"/>
