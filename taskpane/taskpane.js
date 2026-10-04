@@ -496,20 +496,7 @@ function setupEventListeners() {
     var saveSettingsBtn = document.getElementById('saveSettingsBtn');
     var testConnBtn = document.getElementById('testConnBtn');
     var providerSelect = document.getElementById('providerSelect');
-    var providerName = document.getElementById('providerName');
-    var saveProviderBtn = document.getElementById('saveProviderBtn');
-    var deleteProviderBtn = document.getElementById('deleteProviderBtn');
-    var hermesProviderSelect = document.getElementById('hermesProviderSelect');
-    var refreshHermesBtn = document.getElementById('refreshHermesBtn');
-    var importHermesBtn = document.getElementById('importHermesBtn');
-    var hermesHint = document.getElementById('hermesHint');
-    var anthropicModelSelect = document.getElementById('anthropicModelSelect');
-    var refreshAnthropicBtn = document.getElementById('refreshAnthropicBtn');
-    var useAnthropicBtn = document.getElementById('useAnthropicBtn');
-    var anthropicHint = document.getElementById('anthropicHint');
-    var modelSelect = document.getElementById('modelSelect');
-    var addModelBtn = document.getElementById('addModelBtn');
-    var removeModelLink = document.getElementById('removeModelLink');
+    var refreshProvidersBtn = document.getElementById('refreshProvidersBtn');
     var toggleApiKeyBtn = document.getElementById('toggleApiKeyBtn');
     var attachImageBtn = document.getElementById('attachImageBtn');
     var imageInput = document.getElementById('imageInput');
@@ -622,7 +609,8 @@ function setupEventListeners() {
         }
     };
 
-    // Settings modal
+    // Settings modal (disederhanakan): 1 dropdown provider (Hermes + Manual),
+    // 1 kolom model dengan saran, API key, endpoint, dan OpenCode.
     settingsBtn.onclick = function () {
         document.getElementById('settingsModal').className = 'modal';
         document.getElementById('apiKey').value = '';
@@ -631,9 +619,8 @@ function setupEventListeners() {
         document.getElementById('modelInput').value = settings.model;
         document.getElementById('useOpencode').checked = settings.useOpencode === true;
         document.getElementById('opencodeModel').value = settings.opencodeModel;
-        if (providerName) providerName.value = settings.activeProvider || '';
         populateProviderDropdown();
-        populateModelDropdown();
+        populateModelDatalist(Array.isArray(settings.modelList) ? settings.modelList : []);
         hideSettingsStatus();
     };
 
@@ -651,263 +638,54 @@ function setupEventListeners() {
         };
     }
 
-    // ---- Daftar model: dipisah per provider ----
-    // Model yang ditampilkan HANYA milik provider yang sedang dipilih.
-    // Jika provider belum punya daftar sendiri, dipakai arsip modelList global
-    // sebagai cadangan agar daftar lama user tidak hilang.
-    function activeProviderModels() {
-        var name = settings.activeProvider || '';
-        var p = name && settings.providers ? settings.providers[name] : null;
-        if (p && Array.isArray(p.models) && p.models.length) return p.models.slice();
-        if (p) return p.model ? [p.model] : [];
-        // Mode manual (belum pilih provider): tampilkan arsip global.
-        return Array.isArray(settings.modelList) ? settings.modelList.slice() : [];
-    }
+    // ---- Provider: satu dropdown berisi provider Hermes + opsi Manual ----
+    var hermesCatalog = [];
 
-    function populateModelDropdown() {
-        if (!modelSelect) return;
-        var list = activeProviderModels();
-        // Pastikan model aktif selalu ada di daftar tampilan
-        if (settings.model && list.indexOf(settings.model) === -1) list.unshift(settings.model);
-        modelSelect.innerHTML = '';
-        var optNew = document.createElement('option');
-        optNew.value = '';
-        optNew.textContent = settings.activeProvider
-            ? '\u2014 ' + list.length + ' model pada ' + settings.activeProvider + ' \u2014'
-            : '\u2014 Pilih provider dulu, atau ketik model \u2014';
-        modelSelect.appendChild(optNew);
-        for (var i = 0; i < list.length; i++) {
-            var opt = document.createElement('option');
-            opt.value = list[i];
-            opt.textContent = list[i];
-            modelSelect.appendChild(opt);
-        }
-        modelSelect.value = settings.model && list.indexOf(settings.model) !== -1 ? settings.model : '';
-    }
-
-    // Pilih model dari dropdown -> isi input model (jadi aktif saat Simpan).
-    if (modelSelect) {
-        modelSelect.onchange = function () {
-            if (modelSelect.value) {
-                document.getElementById('modelInput').value = modelSelect.value;
-            }
-        };
-    }
-
-    // Tambah model ke daftar PROVIDER AKTIF (bukan daftar global).
-    if (addModelBtn) {
-        addModelBtn.onclick = function () {
-            var m = document.getElementById('modelInput').value.trim();
-            if (!m) { showSettingsStatus('Ketik nama model dulu.', 'error'); return; }
-            var prov = settings.activeProvider || '';
-            if (!prov) {
-                showSettingsStatus('Pilih provider dulu, agar model tersimpan di provider yang tepat.', 'error');
-                return;
-            }
-            var current = activeProviderModels();
-            if (current.indexOf(m) !== -1) {
-                showSettingsStatus('Model "' + m + '" sudah ada di provider ' + prov + '.', 'loading');
-                populateModelDropdown();
-                modelSelect.value = m;
-                return;
-            }
-            addModelBtn.disabled = true;
-            xhrPost(SERVER + '/api/providers/models', { name: prov, model: m }, function (status, data) {
-                addModelBtn.disabled = false;
-                if (status >= 200 && status < 300 && data && data.ok) {
-                    if (data.config && data.config.providers) settings.providers = data.config.providers;
-                    populateModelDropdown();
-                    modelSelect.value = m;
-                    showSettingsStatus('Model "' + m + '" ditambahkan ke provider ' + prov + '.', 'success');
-                } else {
-                    showSettingsStatus('Gagal simpan model: ' + ((data && data.error) || 'server error'), 'error');
-                }
-            });
-        };
-    }
-
-    // Hapus model terpilih dari PROVIDER AKTIF saja.
-    if (removeModelLink) {
-        removeModelLink.onclick = function (e) {
-            if (e && e.preventDefault) e.preventDefault();
-            var m = modelSelect ? modelSelect.value : '';
-            if (!m) { showSettingsStatus('Pilih model dari daftar dulu untuk dihapus.', 'error'); return; }
-            var prov = settings.activeProvider || '';
-            if (!prov) { showSettingsStatus('Pilih provider dulu.', 'error'); return; }
-            xhrRequest('DELETE', SERVER + '/api/providers/models', { name: prov, model: m }, function (status, data) {
-                if (status >= 200 && status < 300 && data && data.ok) {
-                    if (data.config && data.config.providers) settings.providers = data.config.providers;
-                    populateModelDropdown();
-                    showSettingsStatus('Model "' + m + '" dihapus dari provider ' + prov + '.', 'success');
-                } else {
-                    showSettingsStatus('Gagal hapus model: ' + ((data && data.error) || 'server error'), 'error');
-                }
-            });
-        };
-    }
-
-    // Isi dropdown provider dari settings.providers, tandai yang aktif.
     function populateProviderDropdown() {
         if (!providerSelect) return;
-        var providers = settings.providers || {};
-        var names = Object.keys(providers).sort();
         providerSelect.innerHTML = '';
         var optManual = document.createElement('option');
         optManual.value = '';
-        optManual.textContent = '\u2014 Manual / Baru \u2014';
+        optManual.textContent = '\u2014 Manual \u2014';
         providerSelect.appendChild(optManual);
-        for (var i = 0; i < names.length; i++) {
-            var opt = document.createElement('option');
-            opt.value = names[i];
-            var pv = providers[names[i]] || {};
-            var count = Array.isArray(pv.models) ? pv.models.length : 0;
-            opt.textContent = names[i] + ' (' + count + ' model' + (pv.hasKey ? '' : ', tanpa key') + ')';
-            providerSelect.appendChild(opt);
-        }
-        providerSelect.value = settings.activeProvider || '';
-    }
-
-    // Pilih provider dari dropdown -> aktifkan di server, muat field ke form.
-    if (providerSelect) {
-        providerSelect.onchange = function () {
-            var name = providerSelect.value;
-            if (!name) {
-                // "Manual / Baru": kosongkan form untuk membuat provider baru dari nol.
-                document.getElementById('apiKey').value = '';
-                setApiKeyVisible(false);
-                document.getElementById('apiEndpoint').value = '';
-                document.getElementById('modelInput').value = '';
-                document.getElementById('opencodeModel').value = '';
-                document.getElementById('useOpencode').checked = false;
-                if (providerName) { providerName.value = ''; providerName.focus(); }
-                settings.activeProvider = '';
-                settings.model = '';
-                populateModelDropdown();
-                if (modelSelect) modelSelect.value = '';
-                showSettingsStatus('Mode manual: isi form lalu "Simpan sbg Provider".', 'loading');
-                return;
-            }
-            showSettingsStatus('Mengaktifkan provider...', 'loading');
-            xhrPost(SERVER + '/api/providers/activate', { name: name }, function (status, data) {
-                if (status >= 200 && status < 300 && data && data.ok) {
-                    // Sinkronkan settings lokal dari config server yang dikembalikan.
-                    var cfg = data.config || {};
-                    settings.apiEndpoint = cfg.apiEndpoint || '';
-                    settings.model = cfg.model || '';
-                    settings.useOpencode = cfg.useOpencode === true;
-                    if (cfg.opencodeModel) settings.opencodeModel = cfg.opencodeModel;
-                    settings.activeProvider = name;
-                    settings.hasApiKey = cfg.hasApiKey === true;
-                    if (cfg.providers) settings.providers = cfg.providers;
-                    // Perbarui form
-                    document.getElementById('apiKey').value = '';
-                    document.getElementById('apiEndpoint').value = settings.apiEndpoint;
-                    document.getElementById('modelInput').value = settings.model;
-                    document.getElementById('useOpencode').checked = settings.useOpencode;
-                    document.getElementById('opencodeModel').value = settings.opencodeModel || '';
-                    if (providerName) providerName.value = name; // isi nama agar mudah "simpan ulang" utk update
-                    populateModelDropdown();
-                    saveSettingsLocalOnly();
-                    showSettingsStatus('Provider "' + name + '" aktif' + (settings.hasApiKey ? '' : ' (belum ada API key)') + '.', settings.hasApiKey ? 'success' : 'error');
-                } else {
-                    showSettingsStatus('Gagal mengaktifkan: ' + ((data && data.error) || 'server error'), 'error');
-                }
-            });
-        };
-    }
-
-    // Simpan field form saat ini sebagai provider (minta nama).
-    if (saveProviderBtn) {
-        saveProviderBtn.onclick = function () {
-            var name = (providerName ? providerName.value : '').trim();
-            if (!name) {
-                showSettingsStatus('Isi "Nama provider" dulu di kolom atas.', 'error');
-                if (providerName) providerName.focus();
-                return;
-            }
-            var body = {
-                name: name,
-                apiEndpoint: document.getElementById('apiEndpoint').value.trim(),
-                model: document.getElementById('modelInput').value.trim(),
-                useOpencode: document.getElementById('useOpencode').checked === true,
-                opencodeModel: document.getElementById('opencodeModel').value.trim()
-            };
-            var typedKey = document.getElementById('apiKey').value.trim();
-            if (typedKey) body.apiKey = typedKey; // hanya kirim key bila diketik
-            saveProviderBtn.disabled = true;
-            showSettingsStatus('Menyimpan provider...', 'loading');
-            xhrPost(SERVER + '/api/providers', body, function (status, data) {
-                saveProviderBtn.disabled = false;
-                if (status >= 200 && status < 300 && data && data.ok) {
-                    if (data.config && data.config.providers) settings.providers = data.config.providers;
-                    populateProviderDropdown();
-                    providerSelect.value = name;
-                    if (providerName) providerName.value = '';
-                    var hasKey = settings.providers[name] && settings.providers[name].hasKey;
-                    showSettingsStatus('Provider "' + name + '" tersimpan' + (hasKey ? '' : ' (tanpa API key \u2014 ketik key lalu simpan lagi)') + '.', hasKey ? 'success' : 'error');
-                } else {
-                    showSettingsStatus('Gagal simpan provider: ' + ((data && data.error) || 'server error'), 'error');
-                }
-            });
-        };
-    }
-
-    // Hapus provider terpilih. window.confirm diblokir di Office WebView,
-    // jadi pakai konfirmasi klik-dua-kali (klik pertama minta konfirmasi, kedua eksekusi).
-    if (deleteProviderBtn) {
-        var pendingDelete = null;
-        deleteProviderBtn.onclick = function () {
-            var name = providerSelect && providerSelect.value;
-            if (!name) { showSettingsStatus('Pilih provider tersimpan dulu untuk dihapus.', 'error'); return; }
-            if (pendingDelete !== name) {
-                // Klik pertama: minta konfirmasi
-                pendingDelete = name;
-                deleteProviderBtn.textContent = 'Klik lagi utk hapus';
-                showSettingsStatus('Klik "Hapus Provider" sekali lagi untuk konfirmasi hapus "' + name + '".', 'loading');
-                setTimeout(function () {
-                    pendingDelete = null;
-                    deleteProviderBtn.textContent = 'Hapus Provider';
-                }, 4000);
-                return;
-            }
-            // Klik kedua: eksekusi hapus
-            pendingDelete = null;
-            deleteProviderBtn.textContent = 'Hapus Provider';
-            deleteProviderBtn.disabled = true;
-            xhrRequest('DELETE', SERVER + '/api/providers', { name: name }, function (status, data) {
-                deleteProviderBtn.disabled = false;
-                if (status >= 200 && status < 300 && data && data.ok) {
-                    if (data.config && data.config.providers) settings.providers = data.config.providers;
-                    if (settings.activeProvider === name) settings.activeProvider = '';
-                    populateProviderDropdown();
-                    showSettingsStatus('Provider "' + name + '" dihapus.', 'success');
-                } else {
-                    showSettingsStatus('Gagal hapus: ' + ((data && data.error) || 'server error'), 'error');
-                }
-            });
-        };
-    }
-
-
-    // ---- Integrasi Hermes: muat provider & model dari konfigurasi Hermes ----
-    var hermesCatalog = [];
-
-    function populateHermesDropdown() {
-        if (!hermesProviderSelect) return;
-        hermesProviderSelect.innerHTML = '';
-        var optEmpty = document.createElement('option');
-        optEmpty.value = '';
-        optEmpty.textContent = hermesCatalog.length
-            ? '\u2014 Pilih provider Hermes \u2014'
-            : '\u2014 Muat dari Hermes \u2014';
-        hermesProviderSelect.appendChild(optEmpty);
+        var found = false;
         for (var i = 0; i < hermesCatalog.length; i++) {
             var p = hermesCatalog[i];
             var opt = document.createElement('option');
             opt.value = p.name;
             opt.textContent = p.name + ' (' + p.modelCount + ' model' + (p.hasKey ? '' : ', tanpa key') + ')';
-            hermesProviderSelect.appendChild(opt);
+            providerSelect.appendChild(opt);
+            if (p.name === settings.activeProvider) found = true;
         }
+        // Tandai provider yang sedang aktif bila masih ada di katalog Hermes.
+        providerSelect.value = found ? settings.activeProvider : '';
+    }
+
+    // Saran model untuk kolom model (datalist). Di WebView lama yang tidak
+    // mendukung datalist, kolom tetap berfungsi sebagai input teks biasa.
+    function populateModelDatalist(list) {
+        var dl = document.getElementById('modelDatalist');
+        if (!dl) return;
+        dl.innerHTML = '';
+        var seen = {};
+        var items = [];
+        if (settings.model) { items.push(settings.model); seen[settings.model] = true; }
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && !seen[list[i]]) { seen[list[i]] = true; items.push(list[i]); }
+        }
+        for (var j = 0; j < items.length; j++) {
+            var opt = document.createElement('option');
+            opt.value = items[j];
+            dl.appendChild(opt);
+        }
+    }
+
+    function updateProviderHint(ok, hermesHome) {
+        var hint = document.getElementById('providerHint');
+        if (!hint) return;
+        hint.textContent = ok
+            ? 'Ditemukan ' + hermesCatalog.length + ' provider Hermes' + (hermesHome ? ' di ' + hermesHome : '') + '.'
+            : 'Konfigurasi Hermes tidak ditemukan \u2014 pakai mode Manual.';
     }
 
     function loadHermesProviders(done) {
@@ -919,68 +697,38 @@ function setupEventListeners() {
             try { data = JSON.parse(xhr.responseText); } catch (e) { }
             if (xhr.status === 200 && data && data.ok) {
                 hermesCatalog = data.providers || [];
-                populateHermesDropdown();
-                if (hermesHint) {
-                    hermesHint.textContent = hermesCatalog.length
-                        ? 'Ditemukan ' + hermesCatalog.length + ' provider Hermes di ' + (data.hermesHome || 'komputer ini') + '.'
-                        : 'Konfigurasi Hermes terbaca tetapi belum ada provider.';
-                }
+                updateProviderHint(true, data.hermesHome);
                 if (done) done(true);
             } else {
                 hermesCatalog = [];
-                populateHermesDropdown();
-                if (hermesHint) {
-                    hermesHint.textContent = (data && data.error)
-                        ? data.error
-                        : 'Konfigurasi Hermes tidak ditemukan di komputer ini.';
-                }
+                updateProviderHint(false);
                 if (done) done(false);
             }
         };
-        xhr.onerror = function () { if (done) done(false); };
+        xhr.onerror = function () { hermesCatalog = []; updateProviderHint(false); if (done) done(false); };
         xhr.send();
     }
 
-    // Saat memilih provider Hermes, tampilkan model default-nya di kolom model.
-    if (hermesProviderSelect) {
-        hermesProviderSelect.onchange = function () {
-            var name = hermesProviderSelect.value;
-            if (!name) return;
-            for (var i = 0; i < hermesCatalog.length; i++) {
-                if (hermesCatalog[i].name === name) {
-                    var p = hermesCatalog[i];
-                    if (hermesHint) {
-                        hermesHint.textContent = p.modelCount + ' model tersedia. Model default: ' + (p.model || '-') + (p.hasKey ? '' : ' (provider ini tanpa API key di Hermes)');
-                    }
-                    break;
-                }
+    // Pilih provider -> impor config dari Hermes, isi form otomatis.
+    if (providerSelect) {
+        providerSelect.onchange = function () {
+            var name = providerSelect.value;
+            if (!name) {
+                document.getElementById('apiKey').value = '';
+                setApiKeyVisible(false);
+                document.getElementById('apiEndpoint').value = '';
+                document.getElementById('modelInput').value = '';
+                populateModelDatalist([]);
+                settings.activeProvider = '';
+                settings.model = '';
+                showSettingsStatus('Mode manual: isi endpoint, key, dan model, lalu Simpan.', 'loading');
+                return;
             }
-        };
-    }
-
-    if (refreshHermesBtn) {
-        refreshHermesBtn.onclick = function () {
-            refreshHermesBtn.disabled = true;
-            showSettingsStatus('Membaca konfigurasi Hermes...', 'loading');
-            loadHermesProviders(function (ok) {
-                refreshHermesBtn.disabled = false;
-                showSettingsStatus(ok
-                    ? 'Daftar provider Hermes dimuat (' + hermesCatalog.length + ').'
-                    : 'Gagal membaca konfigurasi Hermes.', ok ? 'success' : 'error');
-            });
-        };
-    }
-
-    // Impor provider Hermes -> jadi provider Excel Agent + aktifkan + isi daftar model.
-    if (importHermesBtn) {
-        importHermesBtn.onclick = function () {
-            var name = hermesProviderSelect ? hermesProviderSelect.value : '';
-            if (!name) { showSettingsStatus('Pilih provider Hermes dulu dari dropdown.', 'error'); return; }
             var chosenModel = document.getElementById('modelInput').value.trim();
-            importHermesBtn.disabled = true;
-            showSettingsStatus('Mengimpor provider Hermes "' + name + '"...', 'loading');
+            providerSelect.disabled = true;
+            showSettingsStatus('Memuat provider "' + name + '"...', 'loading');
             xhrPost(SERVER + '/api/hermes/import', { name: name, model: chosenModel }, function (status, data) {
-                importHermesBtn.disabled = false;
+                providerSelect.disabled = false;
                 if (status >= 200 && status < 300 && data && data.ok) {
                     var cfg = data.config || {};
                     settings.apiEndpoint = cfg.apiEndpoint || '';
@@ -989,140 +737,35 @@ function setupEventListeners() {
                     settings.hasApiKey = cfg.hasApiKey === true;
                     if (Array.isArray(cfg.modelList)) settings.modelList = cfg.modelList;
                     if (cfg.providers) settings.providers = cfg.providers;
-
                     document.getElementById('apiKey').value = '';
                     setApiKeyVisible(false);
                     document.getElementById('apiEndpoint').value = settings.apiEndpoint;
                     document.getElementById('modelInput').value = settings.model;
-                    populateModelDropdown();
-                    populateProviderDropdown();
-                    if (providerSelect) providerSelect.value = settings.activeProvider;
+                    populateModelDatalist(data.models || cfg.modelList || []);
                     saveSettingsLocalOnly();
-                    showSettingsStatus('Provider Hermes "' + name + '" aktif dengan ' + (data.models || []).length + ' model' + (settings.hasApiKey ? '' : ' (tanpa API key)') + '.', settings.hasApiKey ? 'success' : 'error');
+                    showSettingsStatus('Provider "' + name + '" dimuat (' + (data.models || []).length + ' model' + (settings.hasApiKey ? '' : ', tanpa API key') + '). Klik Simpan agar permanen.', settings.hasApiKey ? 'success' : 'error');
                     if (typeof checkSystemHealth === 'function') checkSystemHealth();
                 } else {
-                    showSettingsStatus('Gagal impor Hermes: ' + ((data && data.error) || 'server error'), 'error');
+                    showSettingsStatus('Gagal memuat provider: ' + ((data && data.error) || 'server error'), 'error');
                 }
+            });
+        };
+    }
+
+    if (refreshProvidersBtn) {
+        refreshProvidersBtn.onclick = function () {
+            refreshProvidersBtn.disabled = true;
+            showSettingsStatus('Membaca konfigurasi Hermes...', 'loading');
+            loadHermesProviders(function (ok) {
+                refreshProvidersBtn.disabled = false;
+                populateProviderDropdown();
+                showSettingsStatus(ok ? 'Daftar provider dimuat.' : 'Hermes tidak ditemukan.', ok ? 'success' : 'error');
             });
         };
     }
 
     // Muat katalog Hermes sekali saat task pane siap.
     loadHermesProviders();
-
-
-    // ---- Integrasi Anthropic: pakai login Claude Code yang sudah ada ----
-    var anthropicModels = [];
-
-    function populateAnthropicDropdown() {
-        if (!anthropicModelSelect) return;
-        anthropicModelSelect.innerHTML = '';
-        var opt0 = document.createElement('option');
-        opt0.value = '';
-        opt0.textContent = anthropicModels.length
-            ? '\u2014 Pilih model Claude \u2014'
-            : '\u2014 Cek login Anthropic \u2014';
-        anthropicModelSelect.appendChild(opt0);
-        for (var i = 0; i < anthropicModels.length; i++) {
-            var opt = document.createElement('option');
-            opt.value = anthropicModels[i];
-            opt.textContent = anthropicModels[i];
-            anthropicModelSelect.appendChild(opt);
-        }
-    }
-
-    function loadAnthropicStatus(done) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', SERVER + '/api/anthropic/status', true);
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            var data = null;
-            try { data = JSON.parse(xhr.responseText); } catch (e) { }
-            if (xhr.status === 200 && data && data.ok) {
-                anthropicModels = data.models || [];
-                populateAnthropicDropdown();
-                if (anthropicHint) {
-                    var mode = data.mode === 'oauth' ? 'login Claude Code (OAuth)' : 'API key Anthropic';
-                    var exp = '';
-                    if (data.expiresAt) {
-                        try { exp = ' \u2014 token berlaku s/d ' + new Date(data.expiresAt).toLocaleString(); } catch (e) { }
-                    }
-                    anthropicHint.textContent = 'Terhubung via ' + mode + '. ' + anthropicModels.length + ' model tersedia' + (data.modelsFromApi ? ' (dari API Anthropic)' : ' (daftar bawaan)') + '.' + exp;
-                }
-                if (done) done(true, data);
-            } else {
-                anthropicModels = [];
-                populateAnthropicDropdown();
-                if (anthropicHint) {
-                    anthropicHint.textContent = (data && data.error)
-                        ? data.error
-                        : 'Belum login Anthropic. Jalankan "claude login" di terminal, lalu klik Cek Login.';
-                }
-                if (done) done(false, data);
-            }
-        };
-        xhr.onerror = function () { if (done) done(false, null); };
-        xhr.send();
-    }
-
-    if (anthropicModelSelect) {
-        anthropicModelSelect.onchange = function () {
-            if (anthropicModelSelect.value) {
-                document.getElementById('modelInput').value = anthropicModelSelect.value;
-            }
-        };
-    }
-
-    if (refreshAnthropicBtn) {
-        refreshAnthropicBtn.onclick = function () {
-            refreshAnthropicBtn.disabled = true;
-            showSettingsStatus('Memeriksa login Anthropic...', 'loading');
-            loadAnthropicStatus(function (ok) {
-                refreshAnthropicBtn.disabled = false;
-                showSettingsStatus(ok
-                    ? 'Login Anthropic aktif (' + anthropicModels.length + ' model).'
-                    : 'Belum login Anthropic. Jalankan "claude login" dulu.', ok ? 'success' : 'error');
-            });
-        };
-    }
-
-    // Aktifkan Anthropic sebagai provider aktif memakai login yang ada.
-    if (useAnthropicBtn) {
-        useAnthropicBtn.onclick = function () {
-            var chosen = (anthropicModelSelect && anthropicModelSelect.value)
-                || document.getElementById('modelInput').value.trim();
-            useAnthropicBtn.disabled = true;
-            showSettingsStatus('Mengaktifkan Anthropic...', 'loading');
-            xhrPost(SERVER + '/api/anthropic/activate', { model: chosen }, function (status, data) {
-                useAnthropicBtn.disabled = false;
-                if (status >= 200 && status < 300 && data && data.ok) {
-                    var cfg = data.config || {};
-                    settings.apiEndpoint = cfg.apiEndpoint || '';
-                    settings.model = cfg.model || data.model || '';
-                    settings.activeProvider = data.providerName || '';
-                    settings.hasApiKey = cfg.hasApiKey === true;
-                    if (Array.isArray(cfg.modelList)) settings.modelList = cfg.modelList;
-                    if (cfg.providers) settings.providers = cfg.providers;
-
-                    document.getElementById('apiKey').value = '';
-                    setApiKeyVisible(false);
-                    document.getElementById('apiEndpoint').value = settings.apiEndpoint;
-                    document.getElementById('modelInput').value = settings.model;
-                    populateModelDropdown();
-                    populateProviderDropdown();
-                    if (providerSelect) providerSelect.value = settings.activeProvider;
-                    saveSettingsLocalOnly();
-                    showSettingsStatus('Anthropic aktif via ' + (data.mode === 'oauth' ? 'login Claude Code' : 'API key') + ' \u2014 model: ' + settings.model, 'success');
-                    if (typeof checkSystemHealth === 'function') checkSystemHealth();
-                } else {
-                    showSettingsStatus('Gagal aktifkan Anthropic: ' + ((data && data.error) || 'server error'), 'error');
-                }
-            });
-        };
-    }
-
-    // Cek status login Anthropic sekali saat task pane siap.
-    loadAnthropicStatus();
 
 
     closeSettingsBtn.onclick = function () {
@@ -1135,18 +778,6 @@ function setupEventListeners() {
         settings.model = document.getElementById('modelInput').value.trim();
         settings.useOpencode = document.getElementById('useOpencode').checked === true;
         settings.opencodeModel = document.getElementById('opencodeModel').value.trim();
-
-        // Model aktif otomatis masuk daftar PROVIDER AKTIF supaya bisa dipilih lagi nanti.
-        // (modelList global tetap dibiarkan apa adanya sebagai arsip data lama.)
-        var provForSave = settings.activeProvider || '';
-        if (settings.model && provForSave && settings.providers && settings.providers[provForSave]) {
-            var pEntry = settings.providers[provForSave];
-            if (!Array.isArray(pEntry.models)) pEntry.models = [];
-            if (pEntry.models.indexOf(settings.model) === -1) {
-                pEntry.models.push(settings.model);
-                xhrPost(SERVER + '/api/providers/models', { name: provForSave, model: settings.model }, function () { });
-            }
-        }
 
         saveSettingsBtn.disabled = true;
         showSettingsStatus('Menyimpan...', 'loading');
@@ -1195,6 +826,7 @@ function setupEventListeners() {
             }
         });
     };
+
 
     // Hapus riwayat percakapan
     var clearHistoryBtn = document.getElementById('clearHistoryBtn');

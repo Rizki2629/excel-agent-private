@@ -246,47 +246,25 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label for="providerSelect">Provider Tersimpan</label>
-                    <select id="providerSelect">
-                        <option value="">— Manual / Baru —</option>
-                    </select>
-                    <span class="field-hint">Pilih untuk memuat endpoint, model, &amp; API key yang tersimpan</span>
-                    <input type="text" id="providerName" placeholder="Nama provider (mis. Hallo Router)" style="margin-top:6px;">
-                    <span class="field-hint">Isi nama lalu klik "Simpan sbg Provider" untuk menyimpan setelan di bawah</span>
-                    <div class="btn-row" style="margin-top:6px;">
-                        <button id="saveProviderBtn" class="secondary-btn" type="button">Simpan sbg Provider</button>
-                        <button id="deleteProviderBtn" class="secondary-btn" type="button">Hapus Provider</button>
+                    <label for="providerSelect">Provider</label>
+                    <div class="input-with-btn">
+                        <select id="providerSelect">
+                            <option value="">— Manual —</option>
+                        </select>
+                        <button id="refreshProvidersBtn" class="inline-btn" type="button" title="Muat ulang daftar provider Hermes">Muat Ulang</button>
                     </div>
+                    <span class="field-hint" id="providerHint">Provider Hermes terdeteksi otomatis. Pilih "Manual" untuk mengisi sendiri.</span>
                 </div>
-                <hr class="settings-divider">
                 <div class="form-group">
-                    <label for="hermesProviderSelect">Provider Hermes</label>
-                    <select id="hermesProviderSelect">
-                        <option value="">— Muat dari Hermes —</option>
-                    </select>
-                    <span class="field-hint" id="hermesHint">Ambil endpoint, API key, &amp; daftar model langsung dari konfigurasi Hermes di komputer ini.</span>
-                    <div class="btn-row" style="margin-top:6px;">
-                        <button id="refreshHermesBtn" class="secondary-btn" type="button">Muat Ulang Hermes</button>
-                        <button id="importHermesBtn" class="secondary-btn" type="button">Pakai Provider Hermes</button>
-                    </div>
+                    <label for="modelInput">Model</label>
+                    <input type="text" id="modelInput" list="modelDatalist" placeholder="mis. qd/ultimate">
+                    <datalist id="modelDatalist"></datalist>
+                    <span class="field-hint">Ketik nama model atau pilih dari saran.</span>
                 </div>
-                <hr class="settings-divider">
-                <div class="form-group">
-                    <label for="anthropicModelSelect">Anthropic (login Claude)</label>
-                    <select id="anthropicModelSelect">
-                        <option value="">— Cek login Anthropic —</option>
-                    </select>
-                    <span class="field-hint" id="anthropicHint">Memakai login Claude Code yang sudah ada di komputer ini (tanpa API key).</span>
-                    <div class="btn-row" style="margin-top:6px;">
-                        <button id="refreshAnthropicBtn" class="secondary-btn" type="button">Cek Login</button>
-                        <button id="useAnthropicBtn" class="secondary-btn" type="button">Pakai Anthropic</button>
-                    </div>
-                </div>
-                <hr class="settings-divider">
                 <div class="form-group">
                     <label for="apiKey">API Key</label>
                     <div class="input-with-btn">
-                        <input type="password" id="apiKey" placeholder="Masukkan API Key">
+                        <input type="password" id="apiKey" placeholder="Masukkan API Key (bila perlu)">
                         <button id="toggleApiKeyBtn" class="inline-btn" type="button" title="Tampilkan/sembunyikan">Lihat</button>
                     </div>
                 </div>
@@ -295,27 +273,11 @@
                     <input type="text" id="apiEndpoint" placeholder="https://gateway.example.com/v1/chat/completions">
                 </div>
                 <div class="form-group">
-                    <label for="modelSelect">Model</label>
-                    <select id="modelSelect">
-                        <option value="">— Ketik model baru di bawah —</option>
-                    </select>
-                    <div class="input-with-btn" style="margin-top:6px;">
-                        <input type="text" id="modelInput" placeholder="mis. stealth/ox-alpha, gpt-4, claude-3-5-sonnet">
-                        <button id="addModelBtn" class="inline-btn" type="button" title="Simpan model ke daftar">+ Daftar</button>
-                    </div>
-                    <span class="field-hint">Pilih dari daftar untuk ganti cepat, atau ketik model baru lalu klik "+ Daftar". <a href="#" id="removeModelLink">Hapus model terpilih</a></span>
-                </div>
-                <div class="form-group">
                     <label class="checkbox-row" for="useOpencode">
                         <input type="checkbox" id="useOpencode">
-                        <span>Kolaborasi dengan OpenCode (analisis mendalam)</span>
+                        <span>Analisis mendalam (OpenCode)</span>
                     </label>
-                    <span class="field-hint">Bila aktif, prompt dianalisis OpenCode; eksekusi tetap di Excel</span>
-                </div>
-                <div class="form-group">
-                    <label for="opencodeModel">Model OpenCode</label>
-                    <input type="text" id="opencodeModel" placeholder="9router/arap/claude-opus-5">
-                    <span class="field-hint">Format: provider/model (dari opencode models)</span>
+                    <input type="text" id="opencodeModel" placeholder="Model OpenCode (mis. 9router/arap/claude-opus-5)" style="margin-top:6px;">
                 </div>
                 <div id="settingsStatus" class="settings-status hidden"></div>
                 <div class="btn-row">
@@ -326,7 +288,7 @@
         </div>
     </div>
 
-    <script src="taskpane.js?v=68"></script>
+    <script src="taskpane.js?v=69"></script>
     <script src="taskpane-tabs.js?v=1"></script>
 </body>
 </html>
