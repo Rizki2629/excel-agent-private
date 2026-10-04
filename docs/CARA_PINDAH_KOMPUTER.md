@@ -1,48 +1,34 @@
-# 💻 Panduan Instalasi Excel Agent di Komputer Lain
+# 💻 Pasang Excel Agent di Komputer Lain
 
-Panduan memindahkan dan menjalankan **Excel Agent** di komputer Windows lain dengan mudah dalam 3 langkah.
+## 1. Clone repo
 
----
+Repo ini **private**. Siapkan Personal Access Token GitHub (classic, scope `repo`) — dipakai sebagai password saat git meminta login.
 
-## 📋 Prasyarat Minimal di Komputer Baru
-Sebelum menjalankan setup, pastikan komputer baru sudah memiliki:
-1. **Node.js (LTS)** → Download dari [nodejs.org](https://nodejs.org/) (Centang *Add to PATH*).
-2. **Python 3** (Disarankan 3.11 atau lebih baru) → Download dari [python.org](https://python.org/) (Centang *Add Python to PATH*).
-3. **Microsoft Excel** (Excel 2016 / 2019 / 2021 / Office 365).
+```powershell
+git clone https://github.com/Rizki2629/excel-agent-private.git
+cd excel-agent-private
+```
 
----
+## 2. Setup sekali jalan
 
-## 🚀 Langkah Instalasi (Hanya 1x Saja)
+Double-click **`SETUP.bat`** (klik kanan → *Run as Administrator* lebih baik). Otomatis mengerjakan:
 
-1. **Salin Folder `ExcelAgent`** ke komputer baru (misalnya ke `C:\ExcelAgent` atau `D:\ExcelAgent`).
-2. **Klik Kanan `SETUP_KOMPUTER_BARU.bat`** -> pilih **Run as Administrator** (atau Double Click langsung).
-3. Tunggu proses otomatis selesai:
-   - ✅ Memeriksa Node.js & Python
-   - ✅ Menginstall library `pywin32` otomatis
-   - ✅ Menginstall package `npm install`
-   - ✅ Memasang sertifikat HTTPS lokal
-   - ✅ Mendaftarkan Add-in ke Registry Office Windows secara permanen
-   - ✅ Membuat shortcut **Excel Agent Server** di Desktop
+- ✅ Cek Node.js & Python (+ install `pywin32` bila belum ada)
+- ✅ `npm install`
+- ✅ Sertifikat HTTPS lokal
+- ✅ Daftarkan add-in ke Registry Office Windows (permanen)
+- ✅ Shortcut **Excel Agent Server** di Desktop
 
----
+## 3. Pakai harian
 
-## 🎯 Cara Pakai Sehari-Hari
+`START.bat` → `[1] Jalankan Semua` → di Excel tab **HOME** → **Buka Asisten AI**. Selesai kerja: `STOP.bat`.
 
-1. **Jalankan Server**:
-   Double click shortcut **`Excel Agent Server`** di Desktop (atau file `START_SERVER.bat`).
-2. **Buka Excel**:
-   Buka file Excel Anda seperti biasa.
-3. **Gunakan Asisten AI**:
-   - Di tab **HOME (Beranda)** bagian paling kanan, klik tombol **"Buka Asisten AI"**.
-   - Task pane asisten AI akan langsung muncul di sebelah kanan dan siap menerima perintah!
-
----
-
-## ❓ Troubleshooting di Komputer Baru
+## Troubleshooting
 
 | Masalah | Solusi |
 |---|---|
-| **Tombol tidak muncul di Excel** | Jalankan ulang `SETUP_KOMPUTER_BARU.bat` satu kali dengan Excel tertutup. |
-| **Status badge menunjukkan Server Offline** | Pastikan `START_SERVER.bat` sedang berjalan di latar belakang (Port 3000). |
-| **Error pywin32 / win32com** | Buka Command Prompt dan ketik: `pip install pywin32` |
-| **Peringatan Sertifikat SSL** | Jalankan `npx office-addin-dev-certs install --machine` di terminal. |
+| Tombol tidak muncul di Excel | Tutup Excel, jalankan `SETUP.bat` sekali lagi |
+| Badge "Server Offline" | `START.bat` → `[2]` (server harus jalan di port 3000) |
+| Error pywin32 / win32com | Buka Command Prompt: `pip install pywin32` |
+| Peringatan sertifikat SSL | `npx office-addin-dev-certs install --machine` |
+| Taskpane tidak muncul / versi lama | `START.bat` → `[4] Bersihkan cache`, lalu `[1]` |

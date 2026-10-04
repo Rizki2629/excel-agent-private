@@ -43,6 +43,17 @@ Double-click **`SETUP.bat`**, ikuti sampai selesai. Add-in terdaftar permanen di
 
 💬 **Chat** (utama) · ⚡ **Cepat** (aksi sekali klik) · 🖼️ **Gambar** (analisis screenshot, maks 5 gambar) · ⚙️ **Pengaturan** (provider, model, API key)
 
+## Pasang di komputer lain (clone)
+
+Repo ini **private** — siapkan Personal Access Token GitHub (classic, scope `repo`) untuk login saat clone.
+
+```powershell
+git clone https://github.com/Rizki2629/excel-agent-private.git
+cd excel-agent-private
+```
+
+Lalu double-click **`SETUP.bat`** (sekali saja). Selanjutnya pakai harian seperti di atas (`START.bat` → `[1]`).
+
 ## Dokumentasi teknis
 
 Lihat folder [`docs/`](docs/): arsitektur (`TECH_ARCH.md`), deployment (`DEPLOYMENT.md`), referensi cepat (`QUICK_REFERENCE.md`), panduan file .bat (`BATCH_FILES_GUIDE.md`), dan arsip pengembangan.
