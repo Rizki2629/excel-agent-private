@@ -8,26 +8,26 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="taskpane.css?v=61">
+    <link rel="stylesheet" href="taskpane.css?v=62">
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
+        <!-- Header kompak: logo kecil + badge koneksi -->
         <div class="header">
             <div class="logo">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                                    <defs>
-                                        <linearGradient id="logoG" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-                                            <stop offset="0" stop-color="#2D6CDF"/>
-                                            <stop offset="1" stop-color="#1F5AC2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <rect width="24" height="24" rx="6" fill="url(#logoG)"/>
-                                    <path d="M12 5.5L6.5 11h3.25v5h4.5v-5h3.25L12 5.5z" fill="#FFFFFF"/>
-                                    <path d="M5 13.5h2.5v3H5zM16.5 13.5H19v3h-2.5z" fill="#FFFFFF" opacity="0.85"/>
-                                </svg>
-                                <span>Excel Agent</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <defs>
+                        <linearGradient id="logoG" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                            <stop offset="0" stop-color="#2D6CDF"/>
+                            <stop offset="1" stop-color="#1F5AC2"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="24" height="24" rx="6" fill="url(#logoG)"/>
+                    <path d="M12 5.5L6.5 11h3.25v5h4.5v-5h3.25L12 5.5z" fill="#FFFFFF"/>
+                    <path d="M5 13.5h2.5v3H5zM16.5 13.5H19v3h-2.5z" fill="#FFFFFF" opacity="0.85"/>
+                </svg>
+                <span>Excel Agent</span>
             </div>
             <div class="connection-wrapper">
                 <button id="connectionBadge" class="connection-badge status-loading" title="Klik untuk detail status koneksi" aria-label="Status koneksi" aria-expanded="false">
@@ -62,109 +62,182 @@
                     </div>
                 </div>
             </div>
-            <div class="header-actions">
-                <button id="clearHistoryBtn" class="icon-btn" title="Hapus riwayat percakapan">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M6 2h4a1 1 0 011 1v1h3v1.5H2V4h3V3a1 1 0 011-1zm.5 2h3V3.5h-3V4z"/>
-                        <path d="M3.5 6h9l-.7 7.6a1.4 1.4 0 01-1.4 1.3H5.6a1.4 1.4 0 01-1.4-1.3L3.5 6zm2.6 1.6v5.2h1.1V7.6H6.1zm2.7 0v5.2h1.1V7.6H8.8z"/>
-                    </svg>
-                </button>
-                <button id="settingsBtn" class="icon-btn" title="Settings">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 10a2 2 0 100-4 2 2 0 000 4z"/>
-                    <path d="M13.5 8c0-.2-.1-.4-.2-.5l-1-.8v-2l1-.8c.1-.1.2-.3.2-.5s-.1-.4-.2-.5l-1.5-1c-.1-.1-.3-.1-.5-.1h-2c-.2 0-.4.1-.5.2l-.8 1H5.5c-.2 0-.4.1-.5.2L3.5 3.5c-.1.1-.2.3-.2.5s.1.4.2.5l1 .8v2l-1 .8c-.1.1-.2.3-.2.5s.1.4.2.5l1.5 1c.1.1.3.2.5.2h2c.2 0 .4-.1.5-.2l.8-1h2c.2 0 .4-.1.5-.2l1.5-1c.1-.1.2-.3.2-.5zM5.5 9.5c-.8 0-1.5-.7-1.5-1.5s.7-1.5 1.5-1.5 1.5.7 1.5 1.5-.7 1.5-1.5 1.5z"/>
-                </svg>
-            </button>
-            </div>
         </div>
 
-        <div id="workbookStatus" class="workbook-status hidden" role="status" aria-live="polite"></div>
-
-        <!-- Welcome Screen -->
-        <div id="welcomeScreen" class="welcome-screen">
-            <div class="welcome-icon">
-                <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
-                                    <defs>
-                                        <linearGradient id="welcomeLogoG" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
-                                            <stop offset="0" stop-color="#2D6CDF"/>
-                                            <stop offset="1" stop-color="#1F5AC2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <rect width="72" height="72" rx="16" fill="url(#welcomeLogoG)"/>
-                                    <path d="M36 18L21 33h8v18h14V33h8L36 18z" fill="#FFFFFF"/>
-                                    <path d="M14 36h7v8h-7zM51 36h7v8h-7z" fill="#FFFFFF" opacity="0.85"/>
-                                </svg>
-            </div>
-            <h2>Excel Agent, siap membantu</h2>
-            <p>Ketik perintah dalam bahasa Indonesia untuk mengontrol Excel</p>
-            
-            <div class="examples">
-                <div class="example-card" data-prompt="Buat chart penjualan bulanan dari data di Sheet1">
-                    <span class="icon">&#128202;</span>
-                    <span>Buat chart penjualan</span>
-                </div>
-                <div class="example-card" data-prompt="Format sel A1:F10 dengan warna biru dan tebal">
-                    <span class="icon">&#127912;</span>
-                    <span>Format sel</span>
-                </div>
-                <div class="example-card" data-prompt="Ekspor data ke PDF">
-                    <span class="icon">&#128196;</span>
-                    <span>Ekspor ke PDF</span>
-                </div>
-                <div class="example-card" data-prompt="Hitung rata-rata kolom B">
-                    <span class="icon">&#128202;</span>
-                    <span>Hitung rata-rata</span>
-                </div>
-            </div>
+        <!-- Tab bar: fitur dikelompokkan -->
+        <div class="tabbar" role="tablist" aria-label="Navigasi fitur">
+            <button id="tabbtn-chat" class="tab-btn active" role="tab" type="button"><span class="tab-emoji">&#128172;</span><span>Chat</span></button>
+            <button id="tabbtn-cepat" class="tab-btn" role="tab" type="button"><span class="tab-emoji">&#9889;</span><span>Cepat</span></button>
+            <button id="tabbtn-gambar" class="tab-btn" role="tab" type="button"><span class="tab-emoji">&#128247;</span><span>Gambar</span></button>
+            <button id="tabbtn-pengaturan" class="tab-btn" role="tab" type="button"><span class="tab-emoji">&#9881;</span><span>Pengaturan</span></button>
         </div>
 
-        <!-- Chat Messages -->
-        <div id="chatMessages" class="chat-messages"></div>
+        <div class="tab-panels">
+            <!-- TAB: Chat (elemen utama) -->
+            <div id="tab-chat" class="tab-panel active" role="tabpanel">
+                <div id="workbookStatus" class="workbook-status hidden" role="status" aria-live="polite"></div>
 
-        <!-- Loading Indicator -->
-        <div id="loadingIndicator" class="loading hidden">
-            <div class="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
+                <!-- Welcome Screen (ringkas + chip aksi cepat) -->
+                <div id="welcomeScreen" class="welcome-screen">
+                    <div class="welcome-icon">
+                        <svg width="40" height="40" viewBox="0 0 72 72" fill="none">
+                            <defs>
+                                <linearGradient id="welcomeLogoG" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0" stop-color="#2D6CDF"/>
+                                    <stop offset="1" stop-color="#1F5AC2"/>
+                                </linearGradient>
+                            </defs>
+                            <rect width="72" height="72" rx="16" fill="url(#welcomeLogoG)"/>
+                            <path d="M36 18L21 33h8v18h14V33h8L36 18z" fill="#FFFFFF"/>
+                            <path d="M14 36h7v8h-7zM51 36h7v8h-7z" fill="#FFFFFF" opacity="0.85"/>
+                        </svg>
+                    </div>
+                    <h2>Excel Agent, siap membantu</h2>
+                    <p>Ketik perintah dalam bahasa Indonesia untuk mengontrol Excel</p>
+
+                    <div class="chips">
+                        <button type="button" class="chip example-card" data-prompt="Buat chart penjualan bulanan dari data di Sheet1"><span>&#128202;</span><span>Buat chart</span></button>
+                        <button type="button" class="chip example-card" data-prompt="Format sel A1:F10 dengan warna biru dan tebal"><span>&#127912;</span><span>Format sel</span></button>
+                        <button type="button" class="chip example-card" data-prompt="Ekspor data ke PDF"><span>&#128196;</span><span>Ekspor PDF</span></button>
+                        <button type="button" class="chip example-card" data-prompt="Hitung rata-rata kolom B"><span>&#129518;</span><span>Rata-rata</span></button>
+                    </div>
+                </div>
+
+                <!-- Chat Messages -->
+                <div id="chatMessages" class="chat-messages"></div>
+
+                <!-- Loading Indicator -->
+                <div id="loadingIndicator" class="loading hidden">
+                    <div class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <span>Memproses...</span>
+                    <button id="stopBtn" class="stop-btn" type="button" title="Hentikan proses (Esc)">&#9632; Hentikan (Esc)</button>
+                </div>
+
+                <!-- Progress Text -->
+                <div id="progressText" class="progress-text hidden" role="status" aria-live="polite"></div>
+
+                <!-- Input Area -->
+                <div class="input-area">
+                    <div id="imagePreviewList" class="image-preview-list hidden" aria-live="polite"></div>
+                    <div class="input-wrapper">
+                        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+                        <button id="attachImageBtn" class="attach-btn" type="button" title="Lampirkan gambar" aria-label="Lampirkan gambar">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                            </svg>
+                        </button>
+                        <textarea
+                            id="userInput"
+                            placeholder="Ketik perintah Anda di sini..."
+                            rows="1"
+                            disabled
+                        ></textarea>
+                        <button id="sendBtn" class="send-btn" disabled>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="input-footer">
+                        <span class="hint">Paste atau lampirkan hingga 5 gambar</span>
+                        <span id="taskpaneVersion" class="taskpane-version">v1.7.0</span>
+                    </div>
+                </div>
             </div>
-            <span>Memproses...</span>
-            <button id="stopBtn" class="stop-btn" type="button" title="Hentikan proses (Esc)">&#9632; Hentikan (Esc)</button>
-        </div>
 
-        <!-- Progress Text -->
-        <div id="progressText" class="progress-text hidden" role="status" aria-live="polite"></div>
-
-        <!-- Input Area -->
-        <div class="input-area">
-            <div id="imagePreviewList" class="image-preview-list hidden" aria-live="polite"></div>
-            <div class="input-wrapper">
-                <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
-                <button id="attachImageBtn" class="attach-btn" type="button" title="Lampirkan gambar" aria-label="Lampirkan gambar">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-                    </svg>
-                </button>
-                <textarea 
-                    id="userInput" 
-                    placeholder="Ketik perintah Anda di sini..."
-                    rows="1"
-                    disabled
-                ></textarea>
-                <button id="sendBtn" class="send-btn" disabled>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                    </svg>
-                </button>
+            <!-- TAB: Cepat -->
+            <div id="tab-cepat" class="tab-panel" role="tabpanel">
+                <div class="quick-wrap">
+                    <h3>&#9889; Aksi Cepat</h3>
+                    <p class="quick-desc">Klik salah satu &mdash; perintah langsung dikirim ke chat dan dijalankan.</p>
+                    <div class="quick-grid">
+                        <button type="button" class="quick-card example-card" data-prompt="Buat chart penjualan bulanan dari data di Sheet1">
+                            <span class="icon">&#128202;</span>
+                            <span class="label">Buat chart</span>
+                            <span class="hintline">Grafik dari data sheet aktif</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Format sel A1:F10 dengan warna biru dan tebal">
+                            <span class="icon">&#127912;</span>
+                            <span class="label">Format sel</span>
+                            <span class="hintline">Warna, tebal, border</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Ekspor data ke PDF">
+                            <span class="icon">&#128196;</span>
+                            <span class="label">Ekspor ke PDF</span>
+                            <span class="hintline">Simpan sheet sebagai PDF</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Hitung rata-rata kolom B">
+                            <span class="icon">&#129518;</span>
+                            <span class="label">Hitung rata-rata</span>
+                            <span class="hintline">Rumus kolom terpilih</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Urutkan data berdasarkan kolom A ascending">
+                            <span class="icon">&#128259;</span>
+                            <span class="label">Urutkan data</span>
+                            <span class="hintline">Ascending / descending</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Aktifkan filter pada baris header">
+                            <span class="icon">&#128270;</span>
+                            <span class="label">Filter data</span>
+                            <span class="hintline">AutoFilter cepat</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Ubah range data menjadi tabel Excel">
+                            <span class="icon">&#128209;</span>
+                            <span class="label">Buat tabel</span>
+                            <span class="hintline">Ubah range jadi tabel</span>
+                        </button>
+                        <button type="button" class="quick-card example-card" data-prompt="Buatkan sheet baru bernama Rekap">
+                            <span class="icon">&#10133;</span>
+                            <span class="label">Sheet baru</span>
+                            <span class="hintline">Tambah worksheet</span>
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="input-footer">
-                <span class="hint">Paste atau lampirkan hingga 5 gambar</span>
-                <span id="taskpaneVersion" class="taskpane-version">v1.6.0</span>
+
+            <!-- TAB: Gambar -->
+            <div id="tab-gambar" class="tab-panel" role="tabpanel">
+                <div class="img-wrap">
+                    <div class="img-big">&#128247;</div>
+                    <h3>Analisis Gambar</h3>
+                    <p>Lampirkan screenshot tabel atau foto data &mdash; AI akan membacanya sebagai referensi sebelum menulis kode.</p>
+                    <button type="button" id="gambarAttachBtn" class="dropzone">
+                        <div class="dz-icon">&#128206;</div>
+                        <div class="dz-text">Klik untuk memilih gambar</div>
+                        <div class="dz-sub">atau paste langsung dari clipboard di tab Chat</div>
+                    </button>
+                    <p class="img-note">Maksimal 5 gambar per pesan &middot; PNG / JPG / WEBP &middot; maks 5 MB per file.<br>Gambar yang dilampirkan muncul di kolom chat sebelum dikirim.</p>
+                </div>
+            </div>
+
+            <!-- TAB: Pengaturan -->
+            <div id="tab-pengaturan" class="tab-panel" role="tabpanel">
+                <div class="set-wrap">
+                    <h3>&#9881; Pengaturan</h3>
+                    <div class="status-row">
+                        <span class="lbl">Provider aktif</span>
+                        <span class="val" id="setProviderName">&mdash;</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="lbl">Model</span>
+                        <span class="val" id="setModelName">&mdash;</span>
+                    </div>
+                    <button type="button" id="openSettingsFullBtn" class="open-settings">&#9881; Buka Pengaturan Lengkap</button>
+                    <button type="button" id="clearHistoryBtn" class="secondary-btn clear-history-btn">&#128465; Hapus riwayat percakapan</button>
+                    <p class="set-note">Pengaturan provider, model, dan API key tetap memakai jendela yang sama seperti sekarang &mdash; tidak ada yang berubah, hanya cara membukanya.</p>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Settings Modal -->
+    <!-- Tombol settings asli (disembunyikan, dipicu dari tab Pengaturan agar binding JS lama tetap jalan) -->
+    <button id="settingsBtn" type="button" style="display:none" aria-hidden="true" tabindex="-1"></button>
+
+    <!-- Settings Modal (tidak berubah) -->
     <div id="settingsModal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -253,6 +326,6 @@
         </div>
     </div>
 
-    <script src="taskpane.js?v=67"></script>
+    <script src="taskpane.js?v=68"></script>
 </body>
 </html>
