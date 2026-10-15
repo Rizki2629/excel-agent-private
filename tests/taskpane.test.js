@@ -59,7 +59,7 @@ function loadTaskpane() {
       context: { document: { getFilePropertiesAsync() {} } },
       onReady() {}
     },
-    window: {},
+    window: { location: { origin: 'https://localhost:3000' } },
     setTimeout(fn) { fn(); },
     clearTimeout() {},
     setInterval(fn, ms) { return 1; },

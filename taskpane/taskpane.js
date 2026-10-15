@@ -12,7 +12,11 @@ var settings = {
 };
 
 var chatHistory = [];
-var SERVER = 'https://localhost:3000';
+// Basis URL API + halaman: mengikuti origin tempat taskpane dimuat.
+// - Sideload lokal      -> https://localhost:3000
+// - Via subdomain/tunnel -> https://<subdomain> (mis. https://excel.domain.com)
+// Dengan begitu halaman dan API selalu same-origin tanpa config manual.
+var SERVER = window.location.origin;
 var MAX_RETRY = 2;
 var MAX_REPORT_CYCLES = 2; // maksimum siklus "eksekusi -> lapor output ke AI" per pesan
 var reportCycles = 0;

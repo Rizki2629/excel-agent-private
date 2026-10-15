@@ -239,8 +239,14 @@ const DEFAULT_CONFIG = {
     chatHistoryByWorkbook: {}
 };
 
-function isAllowedOrigin(origin) {
-    return !origin || origin === ALLOWED_ORIGIN;
+function isAllowedOrigin(origin, host) {
+    if (!origin) return true;
+    if (origin === ALLOWED_ORIGIN) return true;
+    // Same-origin lewat subdomain/tunnel: Origin harus cocok dengan Host
+    // yang diminta. Tanpa ini, taskpane yang dimuat dari subdomain publik
+    // ditolak (403) saat memanggil /api/*.
+    if (host && origin === 'https://' + host) return true;
+    return false;
 }
 
 function normalizeWorkbookPath(value) {
@@ -1297,7 +1303,7 @@ function createRequestHandler(dependencies = {}) {
 
     return async (req, res) => {
         const origin = req.headers.origin;
-        if (req.url.startsWith('/api/') && !isAllowedOrigin(origin)) {
+        if (req.url.startsWith('/api/') && !isAllowedOrigin(origin, req.headers.host)) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: 'Origin tidak diizinkan.' }));
             return;

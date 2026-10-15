@@ -80,6 +80,14 @@ test('origin hanya mengizinkan add-in lokal dan request tanpa Origin', () => {
   assert.equal(isAllowedOrigin('https://evil.example'), false);
 });
 
+test('origin mengizinkan same-origin via subdomain/tunnel (Origin cocok Host)', () => {
+  assert.equal(isAllowedOrigin('https://excel.contoh.id', 'excel.contoh.id'), true);
+  // Host beda dengan Origin -> tetap ditolak
+  assert.equal(isAllowedOrigin('https://evil.example', 'excel.contoh.id'), false);
+  // Origin localhost tetap lolos walau Host-nya subdomain (kompatibel lama)
+  assert.equal(isAllowedOrigin('https://localhost:3000', 'excel.contoh.id'), true);
+});
+
 test('antrean COM menjalankan pekerjaan berurutan', async () => {
   const events = [];
   const first = enqueueCom(async () => { events.push('mulai-1'); await new Promise(r => setTimeout(r, 20)); events.push('selesai-1'); });
