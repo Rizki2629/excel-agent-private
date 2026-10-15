@@ -24,18 +24,20 @@ echo   1. Server is already running on port 3000
 echo   2. You trust this add-in in Excel
 echo.
 echo ----------------------------------------
-echo Opening Excel to load add-in...
+echo Registering add-in and opening Excel...
 echo ----------------------------------------
 
-:: Open Excel with the workbook
-excel "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm"
+call npx office-addin-debugging start manifest.xml desktop --app excel --no-debug
+if exist "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm" (
+    excel "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm"
+)
 
 echo.
-echo [SUCCESS] Excel opened!
+echo [SUCCESS] Add-in registered!
 echo.
-echo Next steps:
-echo   1. Go to ADD-INS tab in Excel ribbon
-echo   2. Click "Excel Agent" button
-echo   3. If prompted, click "Allow" or "Trust"
+echo Cara membuka:
+echo   1. Buka tab HOME (Beranda) di Ribbon Excel
+echo   2. Cari grup "Excel Agent" di sebelah kanan
+echo   3. Klik tombol "Buka Asisten AI"
 echo.
 pause

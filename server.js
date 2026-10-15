@@ -173,6 +173,9 @@ const DEFAULT_CONFIG = {
     autoRun: true,
     useOpencode: false,
     opencodeModel: '9router/qd/ultimate',
+    providers: {},
+    activeProvider: '',
+    modelList: [],
     chatHistoryByWorkbook: {}
 };
 
@@ -298,9 +301,24 @@ function validateExecutionEnvelope(body) {
 }
 
 function publicSettings(config) {
-    const { chatHistory, chatHistoryByWorkbook, ...publicConfig } = config;
+    const { chatHistory, chatHistoryByWorkbook, providers, ...publicConfig } = config;
     delete publicConfig.apiKey;
     publicConfig.hasApiKey = typeof config.apiKey === 'string' && config.apiKey.length > 0;
+    // Sertakan daftar provider TANPA membocorkan API key: key mentah diganti flag hasKey.
+    if (providers && typeof providers === 'object') {
+        const safe = {};
+        for (const name of Object.keys(providers)) {
+            const p = providers[name] || {};
+            safe[name] = {
+                apiEndpoint: p.apiEndpoint || '',
+                model: p.model || '',
+                opencodeModel: p.opencodeModel || '',
+                useOpencode: p.useOpencode === true,
+                hasKey: typeof p.apiKey === 'string' && p.apiKey.length > 0
+            };
+        }
+        publicConfig.providers = safe;
+    }
     return publicConfig;
 }
 
@@ -361,6 +379,63 @@ function deleteWorkbookHistory(workbookPath) {
     const histories = Object.assign({}, config.chatHistoryByWorkbook || {});
     delete histories[workbookHistoryKey(workbookPath)];
     writeConfig({ chatHistoryByWorkbook: histories });
+}
+
+// ---- Provider profiles: simpan banyak set (endpoint+key+model), pilih untuk aktif ----
+
+function sanitizeProviderName(name) {
+    if (typeof name !== 'string') return '';
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 60) return '';
+    return trimmed;
+}
+
+// Simpan/perbarui satu provider. Key hanya ditimpa bila incoming membawa key baru,
+// sehingga menyimpan ulang tanpa mengetik key tidak menghapus key lama.
+function saveProvider(name, data) {
+    const cleanName = sanitizeProviderName(name);
+    if (!cleanName) { const e = new Error('Nama provider tidak valid.'); e.statusCode = 400; throw e; }
+    const config = readConfig();
+    const providers = Object.assign({}, config.providers || {});
+    const existing = providers[cleanName] || {};
+    const entry = {
+        apiEndpoint: typeof data.apiEndpoint === 'string' ? data.apiEndpoint : (existing.apiEndpoint || ''),
+        model: typeof data.model === 'string' ? data.model : (existing.model || ''),
+        opencodeModel: typeof data.opencodeModel === 'string' ? data.opencodeModel : (existing.opencodeModel || ''),
+        useOpencode: data.useOpencode !== undefined ? data.useOpencode === true : (existing.useOpencode === true),
+        apiKey: (typeof data.apiKey === 'string' && data.apiKey.length > 0) ? data.apiKey : (existing.apiKey || '')
+    };
+    providers[cleanName] = entry;
+    writeConfig({ providers });
+    return cleanName;
+}
+
+function deleteProvider(name) {
+    const cleanName = sanitizeProviderName(name);
+    const config = readConfig();
+    const providers = Object.assign({}, config.providers || {});
+    delete providers[cleanName];
+    const patch = { providers };
+    if (config.activeProvider === cleanName) patch.activeProvider = '';
+    writeConfig(patch);
+}
+
+// Aktifkan provider: salin field-nya (termasuk key) ke setting aktif yang dipakai proxy.
+function activateProvider(name) {
+    const cleanName = sanitizeProviderName(name);
+    const config = readConfig();
+    const providers = config.providers || {};
+    const p = providers[cleanName];
+    if (!p) { const e = new Error('Provider tidak ditemukan.'); e.statusCode = 404; throw e; }
+    const patch = {
+        apiEndpoint: p.apiEndpoint || '',
+        model: p.model || '',
+        activeProvider: cleanName
+    };
+    if (p.opencodeModel) patch.opencodeModel = p.opencodeModel;
+    if (p.useOpencode !== undefined) patch.useOpencode = p.useOpencode === true;
+    if (typeof p.apiKey === 'string' && p.apiKey.length > 0) patch.apiKey = p.apiKey;
+    return writeConfig(patch);
 }
 
 const MIME_TYPES = {
@@ -471,6 +546,92 @@ function prepareOpencodeImages(images, root = os.tmpdir()) {
         paths,
         cleanup: () => fs.rmSync(requestDir, { recursive: true, force: true })
     };
+}
+
+// Fungsi utilitas pengecekan kesehatan server, router/gateway AI, dan python runtime
+function checkRouterHealth(apiEndpoint, apiKey, timeoutMs = 2500) {
+    return new Promise((resolve) => {
+        if (!apiEndpoint || typeof apiEndpoint !== 'string') {
+            return resolve({ ok: false, status: 'unconfigured', message: 'API Endpoint belum disetting.' });
+        }
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(apiEndpoint);
+        } catch (e) {
+            return resolve({ ok: false, status: 'invalid_url', message: 'Format URL API tidak valid.' });
+        }
+
+        const isHttps = parsedUrl.protocol === 'https:';
+        const transport = isHttps ? https : http;
+        
+        // Buat path /models atau gunakan path asal jika sudah spesifik
+        let probePath = parsedUrl.pathname.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '') + '/models';
+        if (!probePath.startsWith('/')) probePath = '/' + probePath;
+
+        const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (isHttps ? 443 : 80),
+            path: probePath,
+            method: 'GET',
+            headers: {
+                'User-Agent': 'ExcelAgent-HealthCheck/1.0',
+                ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+            },
+            timeout: timeoutMs,
+            rejectUnauthorized: false
+        };
+
+        const startTime = Date.now();
+        const req = transport.request(options, (res) => {
+            const latencyMs = Date.now() - startTime;
+            // 200 OK, atau 401/403 (berarti router hidup tapi butuh auth), atau 404 dianggap router reachable
+            const isReachable = res.statusCode >= 200 && res.statusCode < 500;
+            res.resume(); // drain data
+            resolve({
+                ok: isReachable,
+                status: isReachable ? 'online' : 'error',
+                statusCode: res.statusCode,
+                latencyMs
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy();
+            resolve({ ok: false, status: 'timeout', message: `Timeout setelah ${timeoutMs}ms` });
+        });
+
+        req.on('error', (err) => {
+            resolve({ ok: false, status: 'offline', message: err.code || err.message });
+        });
+
+        req.end();
+    });
+}
+
+function checkPythonHealth(pythonPath = (process.env.PYTHON || 'python'), timeoutMs = 2500) {
+    return new Promise((resolve) => {
+        const { execFile } = require('child_process');
+        const script = 'import sys; has_com = False\ntry:\n import win32com.client; has_com=True\nexcept: pass\nprint(f"{sys.version_info.major}.{sys.version_info.minor}|{has_com}")';
+        
+        execFile(pythonPath, ['-c', script], { timeout: timeoutMs }, (err, stdout) => {
+            if (err) {
+                return resolve({ ok: false, status: 'offline', message: err.message });
+            }
+            try {
+                const parts = (stdout || '').trim().split('|');
+                const pyVer = parts[0];
+                const hasWin32com = parts[1] === 'True';
+                resolve({
+                    ok: true,
+                    status: 'online',
+                    version: pyVer,
+                    hasWin32com
+                });
+            } catch (e) {
+                resolve({ ok: true, status: 'online', hasWin32com: false });
+            }
+        });
+    });
 }
 
 // Proxy request ke API eksternal (menghindari CORS)
@@ -613,6 +774,44 @@ function createRequestHandler(dependencies = {}) {
         writeConfigForRequest({ chatHistoryByWorkbook: histories });
     };
 
+    // Provider profile wrappers (pakai read/write yang di-inject supaya bisa diuji).
+    const saveProviderForRequest = (name, data) => {
+        const cleanName = sanitizeProviderName(name);
+        if (!cleanName) { const e = new Error('Nama provider tidak valid.'); e.statusCode = 400; throw e; }
+        const config = readConfigForRequest();
+        const providers = Object.assign({}, config.providers || {});
+        const existing = providers[cleanName] || {};
+        providers[cleanName] = {
+            apiEndpoint: typeof data.apiEndpoint === 'string' ? data.apiEndpoint : (existing.apiEndpoint || ''),
+            model: typeof data.model === 'string' ? data.model : (existing.model || ''),
+            opencodeModel: typeof data.opencodeModel === 'string' ? data.opencodeModel : (existing.opencodeModel || ''),
+            useOpencode: data.useOpencode !== undefined ? data.useOpencode === true : (existing.useOpencode === true),
+            apiKey: (typeof data.apiKey === 'string' && data.apiKey.length > 0) ? data.apiKey : (existing.apiKey || '')
+        };
+        writeConfigForRequest({ providers });
+        return cleanName;
+    };
+    const deleteProviderForRequest = (name) => {
+        const cleanName = sanitizeProviderName(name);
+        const config = readConfigForRequest();
+        const providers = Object.assign({}, config.providers || {});
+        delete providers[cleanName];
+        const patch = { providers };
+        if (config.activeProvider === cleanName) patch.activeProvider = '';
+        writeConfigForRequest(patch);
+    };
+    const activateProviderForRequest = (name) => {
+        const cleanName = sanitizeProviderName(name);
+        const config = readConfigForRequest();
+        const p = (config.providers || {})[cleanName];
+        if (!p) { const e = new Error('Provider tidak ditemukan.'); e.statusCode = 404; throw e; }
+        const patch = { apiEndpoint: p.apiEndpoint || '', model: p.model || '', activeProvider: cleanName };
+        if (p.opencodeModel) patch.opencodeModel = p.opencodeModel;
+        if (p.useOpencode !== undefined) patch.useOpencode = p.useOpencode === true;
+        if (typeof p.apiKey === 'string' && p.apiKey.length > 0) patch.apiKey = p.apiKey;
+        return writeConfigForRequest(patch);
+    };
+
     return async (req, res) => {
         const origin = req.headers.origin;
         if (req.url.startsWith('/api/') && !isAllowedOrigin(origin)) {
@@ -629,6 +828,50 @@ function createRequestHandler(dependencies = {}) {
                 'Access-Control-Allow-Headers': 'Content-Type, Authorization'
             });
             res.end();
+            return;
+        }
+
+        // Health Check: cek server, AI router/gateway, dan Python win32com
+        if (req.url === '/api/health' && req.method === 'GET') {
+            const config = readConfigForRequest();
+            const [routerStatus, pythonStatus] = await Promise.all([
+                checkRouterHealth(config.apiEndpoint, config.apiKey),
+                checkPythonHealth()
+            ]);
+
+            const healthData = {
+                ok: true,
+                timestamp: new Date().toISOString(),
+                server: {
+                    status: 'online',
+                    port: PORT,
+                    uptimeSeconds: Math.floor(process.uptime()),
+                    version: '1.6.0'
+                },
+                router: {
+                    status: routerStatus.status,
+                    ok: routerStatus.ok,
+                    endpoint: config.apiEndpoint || '',
+                    activeModel: config.model || config.opencodeModel || '',
+                    activeProvider: config.activeProvider || 'default',
+                    latencyMs: routerStatus.latencyMs || null,
+                    message: routerStatus.message || null
+                },
+                python: {
+                    status: pythonStatus.status,
+                    ok: pythonStatus.ok,
+                    hasWin32com: pythonStatus.hasWin32com || false,
+                    version: pythonStatus.version || null,
+                    message: pythonStatus.message || null
+                }
+            };
+
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+                'Cache-Control': 'no-store'
+            });
+            res.end(JSON.stringify(healthData));
             return;
         }
 
@@ -651,12 +894,56 @@ function createRequestHandler(dependencies = {}) {
                 const allowed = {};
                 if (typeof incoming.apiKey === 'string' && incoming.apiKey.length > 0) allowed.apiKey = incoming.apiKey;
                 if (incoming.clearApiKey === true) allowed.apiKey = '';
-                ['apiEndpoint', 'model', 'autoRun', 'useOpencode', 'opencodeModel'].forEach((k) => { if (incoming[k] !== undefined) allowed[k] = incoming[k]; });
+                ['apiEndpoint', 'model', 'autoRun', 'useOpencode', 'opencodeModel', 'modelList'].forEach((k) => { if (incoming[k] !== undefined) allowed[k] = incoming[k]; });
                 const saved = writeConfigForRequest(allowed);
                 res.writeHead(200, {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': ALLOWED_ORIGIN
                 });
+                res.end(JSON.stringify({ ok: true, config: publicSettings(saved) }));
+            } catch (e) {
+                res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
+            return;
+        }
+
+        // Provider profiles: simpan/perbarui satu provider (nama + endpoint + key + model)
+        if (req.url === '/api/providers' && req.method === 'POST') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                saveProviderForRequest(incoming.name, incoming);
+                const saved = readConfigForRequest();
+                res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ALLOWED_ORIGIN });
+                res.end(JSON.stringify({ ok: true, config: publicSettings(saved) }));
+            } catch (e) {
+                res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
+            return;
+        }
+
+        // Provider profiles: aktifkan (salin field provider ke setting aktif yang dipakai proxy)
+        if (req.url === '/api/providers/activate' && req.method === 'POST') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                const saved = activateProviderForRequest(incoming.name);
+                res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ALLOWED_ORIGIN });
+                res.end(JSON.stringify({ ok: true, config: publicSettings(saved) }));
+            } catch (e) {
+                res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
+            return;
+        }
+
+        // Provider profiles: hapus satu provider
+        if (req.url === '/api/providers' && req.method === 'DELETE') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                deleteProviderForRequest(incoming.name);
+                const saved = readConfigForRequest();
+                res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ALLOWED_ORIGIN });
                 res.end(JSON.stringify({ ok: true, config: publicSettings(saved) }));
             } catch (e) {
                 res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
@@ -1069,6 +1356,10 @@ module.exports = {
   workbookHistoryKey,
   publicSettings,
   resolveProxyApiKey,
+  saveProvider,
+  deleteProvider,
+  activateProvider,
+  sanitizeProviderName,
   runOpencode,
   MAX_REQUEST_BODY_BYTES,
   MAX_PENDING_COM,
@@ -1081,7 +1372,9 @@ module.exports = {
   prepareOpencodeImages,
   OPENCODE_MODEL_RE,
   OPENCODE_SESSION_RE,
-  readBody
+  readBody,
+  checkRouterHealth,
+  checkPythonHealth
 };
 
 if (require.main === module) {

@@ -41,9 +41,12 @@ echo.
 
 timeout /t 3 /nobreak >nul
 
-echo Step 4 of 4: Opening Excel with add-in...
-excel "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm"
-echo [OK] Excel opened.
+echo Step 4 of 4: Sideloading add-in and opening Excel...
+call npx office-addin-debugging start manifest.xml desktop --app excel --no-debug
+if exist "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm" (
+    excel "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm"
+)
+echo [OK] Add-in registered and Excel opened.
 echo.
 
 echo ----------------------------------------
@@ -51,10 +54,10 @@ echo 🎉 EVERYTHING IS NOW RUNNING!
 echo ----------------------------------------
 echo.
 echo Your workbook has been opened in Excel.
-echo If the taskpane doesn't appear automatically:
-echo   1. Go to ADD-INS tab in ribbon
-echo   2. Click "Excel Agent" button
-echo   3. Grant permissions when prompted
+echo Untuk membuka panel:
+echo   1. Buka tab HOME (Beranda) di Ribbon Excel
+echo   2. Cari grup "Excel Agent" di sebelah kanan
+echo   3. Klik tombol "Buka Asisten AI"
 echo.
 echo Server is running at: https://localhost:3000/taskpane.html
 echo.

@@ -53,9 +53,12 @@ goto MENU
 
 :LOAD_ADDIN
 cls
-echo Loading add-in...
-excel "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm"
-echo [OK] Excel opened
+echo Registering add-in...
+call npx office-addin-debugging start manifest.xml desktop --app excel --no-debug
+if exist "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm" (
+    excel "C:\Users\acer\agent_excel\ADMINISTRSAI KELAS.xlsm"
+)
+echo [OK] Add-in loaded
 timeout /t 2 /nobreak >nul
 goto MENU
 

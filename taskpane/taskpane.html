@@ -8,7 +8,7 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="taskpane.css?v=53">
+    <link rel="stylesheet" href="taskpane.css?v=61">
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 </head>
 <body>
@@ -17,11 +17,50 @@
         <div class="header">
             <div class="logo">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <rect width="24" height="24" rx="4" fill="#10A37F"/>
-                    <path d="M12 6L8 10H11V14H8L12 18V6Z" fill="white"/>
-                    <path d="M14 10H16V14H14" stroke="white" stroke-width="1.5"/>
-                </svg>
-                <span>Excel Agent</span>
+                                    <defs>
+                                        <linearGradient id="logoG" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                                            <stop offset="0" stop-color="#2D6CDF"/>
+                                            <stop offset="1" stop-color="#1F5AC2"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <rect width="24" height="24" rx="6" fill="url(#logoG)"/>
+                                    <path d="M12 5.5L6.5 11h3.25v5h4.5v-5h3.25L12 5.5z" fill="#FFFFFF"/>
+                                    <path d="M5 13.5h2.5v3H5zM16.5 13.5H19v3h-2.5z" fill="#FFFFFF" opacity="0.85"/>
+                                </svg>
+                                <span>Excel Agent</span>
+            </div>
+            <div class="connection-wrapper">
+                <button id="connectionBadge" class="connection-badge status-loading" title="Klik untuk detail status koneksi" aria-label="Status koneksi" aria-expanded="false">
+                    <span class="badge-dot"></span>
+                    <span id="badgeLabel" class="badge-label">Checking...</span>
+                </button>
+                <div id="connectionPopover" class="connection-popover hidden" role="dialog" aria-label="Detail Koneksi">
+                    <div class="popover-header">
+                        <span>Status Sistem</span>
+                        <button id="refreshHealthBtn" class="popover-refresh-btn" title="Periksa status sekarang">&#x21bb;</button>
+                    </div>
+                    <div class="popover-item" id="healthServerItem">
+                        <span class="item-dot dot-gray"></span>
+                        <div class="item-info">
+                            <span class="item-title">Server Lokal</span>
+                            <span class="item-desc" id="healthServerDesc">Memeriksa...</span>
+                        </div>
+                    </div>
+                    <div class="popover-item" id="healthRouterItem">
+                        <span class="item-dot dot-gray"></span>
+                        <div class="item-info">
+                            <span class="item-title">AI Router</span>
+                            <span class="item-desc" id="healthRouterDesc">Memeriksa...</span>
+                        </div>
+                    </div>
+                    <div class="popover-item" id="healthPythonItem">
+                        <span class="item-dot dot-gray"></span>
+                        <div class="item-info">
+                            <span class="item-title">Python COM</span>
+                            <span class="item-desc" id="healthPythonDesc">Memeriksa...</span>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="header-actions">
                 <button id="clearHistoryBtn" class="icon-btn" title="Hapus riwayat percakapan">
@@ -44,11 +83,17 @@
         <!-- Welcome Screen -->
         <div id="welcomeScreen" class="welcome-screen">
             <div class="welcome-icon">
-                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                    <rect width="64" height="64" rx="12" fill="#10A37F"/>
-                    <path d="M32 16L20 28H28V36H20L32 48V16Z" fill="white"/>
-                    <path d="M36 28H44V36H36" stroke="white" stroke-width="2"/>
-                </svg>
+                <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+                                    <defs>
+                                        <linearGradient id="welcomeLogoG" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+                                            <stop offset="0" stop-color="#2D6CDF"/>
+                                            <stop offset="1" stop-color="#1F5AC2"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <rect width="72" height="72" rx="16" fill="url(#welcomeLogoG)"/>
+                                    <path d="M36 18L21 33h8v18h14V33h8L36 18z" fill="#FFFFFF"/>
+                                    <path d="M14 36h7v8h-7zM51 36h7v8h-7z" fill="#FFFFFF" opacity="0.85"/>
+                                </svg>
             </div>
             <h2>Excel Agent, siap membantu</h2>
             <p>Ketik perintah dalam bahasa Indonesia untuk mengontrol Excel</p>
@@ -113,7 +158,7 @@
             </div>
             <div class="input-footer">
                 <span class="hint">Paste atau lampirkan hingga 5 gambar</span>
-                <span id="taskpaneVersion" class="taskpane-version">v1.5.1</span>
+                <span id="taskpaneVersion" class="taskpane-version">v1.6.0</span>
             </div>
         </div>
     </div>
@@ -127,17 +172,40 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
+                    <label for="providerSelect">Provider Tersimpan</label>
+                    <select id="providerSelect">
+                        <option value="">— Manual / Baru —</option>
+                    </select>
+                    <span class="field-hint">Pilih untuk memuat endpoint, model, &amp; API key yang tersimpan</span>
+                    <input type="text" id="providerName" placeholder="Nama provider (mis. Hallo Router)" style="margin-top:6px;">
+                    <span class="field-hint">Isi nama lalu klik "Simpan sbg Provider" untuk menyimpan setelan di bawah</span>
+                    <div class="btn-row" style="margin-top:6px;">
+                        <button id="saveProviderBtn" class="secondary-btn" type="button">Simpan sbg Provider</button>
+                        <button id="deleteProviderBtn" class="secondary-btn" type="button">Hapus Provider</button>
+                    </div>
+                </div>
+                <hr class="settings-divider">
+                <div class="form-group">
                     <label for="apiKey">API Key</label>
-                    <input type="password" id="apiKey" placeholder="Masukkan API Key">
+                    <div class="input-with-btn">
+                        <input type="password" id="apiKey" placeholder="Masukkan API Key">
+                        <button id="toggleApiKeyBtn" class="inline-btn" type="button" title="Tampilkan/sembunyikan">Lihat</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="apiEndpoint">API Endpoint</label>
                     <input type="text" id="apiEndpoint" placeholder="https://gateway.example.com/v1/chat/completions">
                 </div>
                 <div class="form-group">
-                    <label for="modelInput">Model</label>
-                    <input type="text" id="modelInput" placeholder="mis. gpt-4, claude-3-5-sonnet, llama-3.1-70b">
-                    <span class="field-hint">Ketik nama model sesuai gateway Anda</span>
+                    <label for="modelSelect">Model</label>
+                    <select id="modelSelect">
+                        <option value="">— Ketik model baru di bawah —</option>
+                    </select>
+                    <div class="input-with-btn" style="margin-top:6px;">
+                        <input type="text" id="modelInput" placeholder="mis. stealth/ox-alpha, gpt-4, claude-3-5-sonnet">
+                        <button id="addModelBtn" class="inline-btn" type="button" title="Simpan model ke daftar">+ Daftar</button>
+                    </div>
+                    <span class="field-hint">Pilih dari daftar untuk ganti cepat, atau ketik model baru lalu klik "+ Daftar". <a href="#" id="removeModelLink">Hapus model terpilih</a></span>
                 </div>
                 <div class="form-group">
                     <label class="checkbox-row" for="useOpencode">
@@ -160,6 +228,6 @@
         </div>
     </div>
 
-    <script src="taskpane.js?v=53"></script>
+    <script src="taskpane.js?v=61"></script>
 </body>
 </html>
