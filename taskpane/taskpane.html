@@ -279,6 +279,25 @@
                     </label>
                     <input type="text" id="opencodeModel" placeholder="Model OpenCode (mis. 9router/arap/claude-opus-5)" style="margin-top:6px;">
                 </div>
+                <div class="form-group settings-section">
+                    <label class="section-title">Identitas Pengguna</label>
+                    <span class="field-hint">Model mengenali pemilik dari data ini. Tersimpan di komputer sendiri.</span>
+                    <label for="profilNama">Nama</label>
+                    <input type="text" id="profilNama" placeholder="Nama lengkap">
+                    <label for="profilPeran" style="margin-top:6px;">Peran / Pekerjaan</label>
+                    <input type="text" id="profilPeran" placeholder="mis. Guru kelas IV, SDN Grogol Utara 09">
+                    <label for="profilZona" style="margin-top:6px;">Zona Waktu</label>
+                    <input type="text" id="profilZona" placeholder="mis. Asia/Jakarta (WIB)">
+                    <label for="profilBahasa" style="margin-top:6px;">Bahasa</label>
+                    <input type="text" id="profilBahasa" placeholder="mis. Bahasa Indonesia, santai tapi jelas">
+                    <label for="profilGaya" style="margin-top:6px;">Gaya Jawab</label>
+                    <input type="text" id="profilGaya" placeholder="mis. Singkat, langsung ke hasil">
+                </div>
+                <div class="form-group settings-section">
+                    <label class="section-title">Memori Jangka Panjang</label>
+                    <span class="field-hint">Agent belajar dari koreksi dan kebiasaanmu. Bilang "ingat ini" saat chat untuk mencatat.</span>
+                    <div id="memoriList" class="memori-list"></div>
+                </div>
                 <div id="settingsStatus" class="settings-status hidden"></div>
                 <div class="btn-row">
                     <button id="testConnBtn" class="secondary-btn">Cek Koneksi</button>

@@ -211,6 +211,20 @@ function runOpencode(prompt, model, sessionId, dir, progressFile, cancelRef, ima
 // supaya API key tidak ikut ter-commit dan tidak hilang saat cache Office dibersihkan).
 const CONFIG_DIR = path.join(process.env.APPDATA || os.homedir(), 'ExcelAgent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+// Profil identitas pengguna: dibaca model setiap sesi agar mengenali pemilik.
+// Disimpan di luar repo supaya tidak ikut ter-commit dan tidak hilang saat update.
+const PROFIL_FILE = path.join(CONFIG_DIR, 'profil.json');
+// Memori jangka panjang: pelajaran dari koreksi, preferensi, dan pola sukses.
+// Ditulis oleh agent lewat blok ```memory dan dibaca ulang setiap sesi.
+const MEMORI_FILE = path.join(CONFIG_DIR, 'memori.json');
+
+const DEFAULT_PROFIL = {
+    nama: 'Muhammad Rizki Pratama, S.Pd',
+    peran: 'Guru kelas IV, SDN Grogol Utara 09',
+    zonaWaktu: 'Asia/Jakarta (WIB)',
+    bahasa: 'Bahasa Indonesia, santai tapi jelas',
+    gayaJawab: 'Singkat, langsung ke hasil. Tidak bertele-tele.'
+};
 
 const DEFAULT_CONFIG = {
     apiKey: '',
@@ -408,6 +422,71 @@ function writeConfig(partial) {
     // Batasi akses ke pemilik saja (best-effort; diabaikan bila FS tidak mendukung)
     try { fs.chmodSync(CONFIG_FILE, 0o600); } catch (e) { }
     return merged;
+}
+
+// ---- Profil identitas pengguna ----
+function readProfil() {
+    try {
+        const raw = fs.readFileSync(PROFIL_FILE, 'utf8');
+        return Object.assign({}, DEFAULT_PROFIL, JSON.parse(raw));
+    } catch (e) {
+        return Object.assign({}, DEFAULT_PROFIL);
+    }
+}
+
+function writeProfil(partial) {
+    const merged = readProfil();
+    ['nama', 'peran', 'zonaWaktu', 'bahasa', 'gayaJawab'].forEach((k) => {
+        if (typeof partial[k] === 'string' && partial[k].trim()) merged[k] = partial[k].trim().slice(0, 200);
+    });
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(PROFIL_FILE, JSON.stringify(merged, null, 2), 'utf8');
+    return merged;
+}
+
+// ---- Memori jangka panjang ----
+const MEMORI_KATEGORI = ['preferensi', 'koreksi', 'pola', 'fakta'];
+
+function readMemori() {
+    try {
+        const raw = fs.readFileSync(MEMORI_FILE, 'utf8');
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function writeMemori(list) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(MEMORI_FILE, JSON.stringify(list, null, 2), 'utf8');
+    return list;
+}
+
+// Tambah satu memori. Batas 200 entri, entri terlama dibuang bila penuh.
+function addMemori(kategori, isi) {
+    const kat = MEMORI_KATEGORI.indexOf(kategori) !== -1 ? kategori : 'fakta';
+    const teks = String(isi || '').trim().slice(0, 1000);
+    if (!teks) { const e = new Error('Isi memori kosong.'); e.statusCode = 400; throw e; }
+    // Tolak yang mirip dengan yang sudah ada (hindari duplikat)
+    const list = readMemori();
+    const norm = teks.toLowerCase();
+    if (list.some((m) => m.isi && m.isi.toLowerCase() === norm)) {
+        const e = new Error('Memori ini sudah tercatat.'); e.statusCode = 409; throw e;
+    }
+    list.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        tanggal: new Date().toISOString().slice(0, 10),
+        kategori: kat,
+        isi: teks
+    });
+    while (list.length > 200) list.shift();
+    return writeMemori(list);
+}
+
+function deleteMemori(id) {
+    const list = readMemori().filter((m) => m.id !== id);
+    return writeMemori(list);
 }
 
 // Migrasi non-destruktif ke skema "model per provider".
@@ -1162,6 +1241,84 @@ function createRequestHandler(dependencies = {}) {
             return;
         }
 
+        // Profil identitas: baca
+        if (req.url === '/api/profil' && req.method === 'GET') {
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+                'Cache-Control': 'no-store'
+            });
+            res.end(JSON.stringify({ ok: true, profil: readProfil() }));
+            return;
+        }
+
+        // Profil identitas: simpan
+        if (req.url === '/api/profil' && req.method === 'POST') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                const saved = writeProfil(incoming || {});
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': ALLOWED_ORIGIN
+                });
+                res.end(JSON.stringify({ ok: true, profil: saved }));
+            } catch (e) {
+                res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
+            return;
+        }
+
+        // Memori: baca semua
+        if (req.url === '/api/memori' && req.method === 'GET') {
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+                'Cache-Control': 'no-store'
+            });
+            res.end(JSON.stringify({ ok: true, memori: readMemori() }));
+            return;
+        }
+
+        // Memori: tambah satu (dipakai agent lewat blok ```memory dan UI)
+        if (req.url === '/api/memori' && req.method === 'POST') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                // Larangan keras: jangan simpan kredensial ke memori
+                if (/api[-_ ]?key|password|token|secret/i.test(incoming.isi || '')) {
+                    const e = new Error('Ditolak: jangan simpan kredensial ke memori.');
+                    e.statusCode = 400; throw e;
+                }
+                const list = addMemori(incoming.kategori, incoming.isi);
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': ALLOWED_ORIGIN
+                });
+                res.end(JSON.stringify({ ok: true, memori: list }));
+            } catch (e) {
+                res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
+            return;
+        }
+
+        // Memori: hapus satu
+        if (req.url === '/api/memori' && req.method === 'DELETE') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                const list = deleteMemori(incoming.id);
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': ALLOWED_ORIGIN
+                });
+                res.end(JSON.stringify({ ok: true, memori: list }));
+            } catch (e) {
+                res.writeHead(e.statusCode || 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
+            return;
+        }
+
         // Provider profiles: simpan/perbarui satu provider (nama + endpoint + key + model)
         if (req.url === '/api/providers' && req.method === 'POST') {
             try {
@@ -1831,7 +1988,13 @@ module.exports = {
   unregisterExecution,
   cancelExecutions,
   anthropic,
-  proxyToAnthropic
+  proxyToAnthropic,
+  readProfil,
+  writeProfil,
+  readMemori,
+  addMemori,
+  deleteMemori,
+  MEMORI_KATEGORI,
 };
 
 if (require.main === module) {

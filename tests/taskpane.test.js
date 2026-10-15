@@ -129,7 +129,7 @@ test('binding OneDrive memakai nama workbook yang sudah didekode', () => {
 test('taskpane menampilkan versi di pojok kanan bawah', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.html'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.css'), 'utf8');
-  assert.match(html, /id="taskpaneVersion"[^>]*>v1\.6\.0</);
+  assert.match(html, /id="taskpaneVersion"[^>]*>v1\.7\.0</);
   assert.match(css, /\.taskpane-version[\s\S]*text-align:\s*right/);
 });
 

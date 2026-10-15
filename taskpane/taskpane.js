@@ -126,6 +126,11 @@ function initApp() {
                 loadHistory(function () { restoreHistory(); });
             }
         });
+        // Profil identitas + memori: agar model mengenali pemilik sejak awal
+        loadProfilMemori(function () {
+            fillProfilForm();
+            renderMemoriList();
+        });
     });
 }
 
@@ -235,6 +240,203 @@ function createSessionId() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0;
         return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+    });
+}
+
+// ---- Profil identitas & memori jangka panjang ----
+// Dimuat sekali saat start, disuntik ke system prompt setiap chat
+// agar model mengenali pemilik dan belajar dari sesi sebelumnya.
+var userProfil = {};
+var userMemori = [];
+
+function loadProfilMemori(done) {
+    var finished = 0;
+    function oneDone() {
+        finished += 1;
+        if (finished >= 2 && done) done();
+    }
+    var xhr1 = new XMLHttpRequest();
+    xhr1.open('GET', SERVER + '/api/profil', true);
+    xhr1.onreadystatechange = function () {
+        if (xhr1.readyState !== 4) return;
+        if (xhr1.status === 200) {
+            try { userProfil = JSON.parse(xhr1.responseText).profil || {}; } catch (e) { }
+        }
+        oneDone();
+    };
+    xhr1.onerror = oneDone;
+    xhr1.send();
+    var xhr2 = new XMLHttpRequest();
+    xhr2.open('GET', SERVER + '/api/memori', true);
+    xhr2.onreadystatechange = function () {
+        if (xhr2.readyState !== 4) return;
+        if (xhr2.status === 200) {
+            try { userMemori = JSON.parse(xhr2.responseText).memori || []; } catch (e) { }
+        }
+        oneDone();
+    };
+    xhr2.onerror = oneDone;
+    xhr2.send();
+}
+
+function buildProfilPrompt() {
+    var p = userProfil || {};
+    var lines = ['### PROFIL PENGGUNA ###'];
+    lines.push('Kamu mengenali pengguna ini. Sapa dan layani sesuai identitasnya.');
+    if (p.nama) lines.push('Nama: ' + p.nama);
+    if (p.peran) lines.push('Peran: ' + p.peran);
+    if (p.zonaWaktu) lines.push('Zona waktu: ' + p.zonaWaktu);
+    if (p.bahasa) lines.push('Bahasa: ' + p.bahasa);
+    if (p.gayaJawab) lines.push('Gaya jawab: ' + p.gayaJawab);
+    lines.push('');
+    return lines.join('\n');
+}
+
+function buildMemoriPrompt() {
+    var lines = ['### MEMORI JANGKA PANJANG ###'];
+    lines.push('Ini pelajaran dari sesi-sesi sebelumnya dengan pengguna ini. Patuhi semuanya.');
+    if (!userMemori.length) {
+        lines.push('(Belum ada memori tersimpan.)');
+    } else {
+        userMemori.forEach(function (m) {
+            lines.push('- [' + m.kategori + '] ' + m.isi);
+        });
+    }
+    lines.push('');
+    return lines.join('\n');
+}
+
+// Protokol agar agent bisa MENULIS memori sendiri lewat blok ```memory.
+var MEMORY_PROTOCOL =
+    '### PROTOKOL MEMORI (CARA BELAJAR) ###\n' +
+    'Kamu BISA dan HARUS belajar dari pengguna. Jika pengguna berkata "ingat ini", "catat",\n' +
+    '"jangan lupa", atau mengoreksimu ("bukan begitu, yang benar...", "salah, harusnya..."),\n' +
+    'simpan pelajarannya ke memori permanen dengan blok:\n' +
+    '```memory\n' +
+    'kategori: preferensi\n' +
+    'isi: ...\n' +
+    '```\n' +
+    'Kategori: preferensi (kebiasaan user), koreksi (kesalahanmu yang diperbaiki user),\n' +
+    'pola (cara kerja yang terbukti berhasil, bisa dipakai ulang), fakta (info tentang user/pekerjaannya).\n' +
+    'Tulis SATU pelajaran per blok, singkat dan konkret (maks 2 kalimat).\n' +
+    'Contoh: user bilang "ingat, daftar hadir selalu kolom tanggal format DD-MM-YYYY"\n' +
+    '-> ```memory\\nkategori: preferensi\\nisi: Format tanggal di daftar hadir selalu DD-MM-YYYY.\\n```\n' +
+    'DILARANG menyimpan API key, password, token, atau data rahasia apa pun ke memori.\n' +
+    'JANGAN umumkan bahwa kamu menyimpan memori dengan kalimat panjang; cukup kerjakan.\n\n';
+
+function extractMemoryBlocks(content) {
+    var blocks = [];
+    var regex = /```memory[ \t]*\r?\n([\s\S]*?)```/gi;
+    var match;
+    while ((match = regex.exec(content)) !== null) {
+        var body = match[1];
+        var kategori = 'fakta';
+        var isi = '';
+        var km = body.match(/kategori\s*:\s*(preferensi|koreksi|pola|fakta)/i);
+        if (km) kategori = km[1].toLowerCase();
+        var im = body.match(/isi\s*:\s*([\s\S]*)/i);
+        if (im) isi = im[1].replace(/^\s+|\s+$/g, '');
+        if (isi) blocks.push({ kategori: kategori, isi: isi });
+    }
+    return blocks;
+}
+
+function saveMemoryBlock(block, done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + '/api/memori', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+            try { userMemori = JSON.parse(xhr.responseText).memori || userMemori; } catch (e) { }
+        }
+        if (done) done(xhr.status === 200);
+    };
+    xhr.onerror = function () { if (done) done(false); };
+    xhr.send(JSON.stringify(block));
+}
+
+function saveProfil(done) {
+    var payload = {
+        nama: document.getElementById('profilNama').value,
+        peran: document.getElementById('profilPeran').value,
+        zonaWaktu: document.getElementById('profilZona').value,
+        bahasa: document.getElementById('profilBahasa').value,
+        gayaJawab: document.getElementById('profilGaya').value
+    };
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + '/api/profil', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+            try { userProfil = JSON.parse(xhr.responseText).profil || {}; } catch (e) { }
+        }
+        if (done) done(xhr.status === 200);
+    };
+    xhr.onerror = function () { if (done) done(false); };
+    xhr.send(JSON.stringify(payload));
+}
+
+function deleteMemoriEntry(id, done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('DELETE', SERVER + '/api/memori', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+            try { userMemori = JSON.parse(xhr.responseText).memori || []; } catch (e) { }
+        }
+        if (done) done(xhr.status === 200);
+    };
+    xhr.onerror = function () { if (done) done(false); };
+    xhr.send(JSON.stringify({ id: id }));
+}
+
+// Isi form profil di modal Pengaturan dari data server.
+function fillProfilForm() {
+    var p = userProfil || {};
+    var map = {
+        profilNama: p.nama, profilPeran: p.peran, profilZona: p.zonaWaktu,
+        profilBahasa: p.bahasa, profilGaya: p.gayaJawab
+    };
+    for (var id in map) {
+        var el = document.getElementById(id);
+        if (el && map[id]) el.value = map[id];
+    }
+}
+
+// Tampilkan daftar memori di modal Pengaturan, bisa dihapus satu per satu.
+function renderMemoriList() {
+    var box = document.getElementById('memoriList');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!userMemori.length) {
+        box.innerHTML = '<div class="memori-empty">Belum ada memori. Agent mencatat otomatis saat kamu bilang "ingat ini" atau mengoreksinya.</div>';
+        return;
+    }
+    userMemori.forEach(function (m) {
+        var row = document.createElement('div');
+        row.className = 'memori-row';
+        var tag = document.createElement('span');
+        tag.className = 'memori-tag memori-' + m.kategori;
+        tag.textContent = m.kategori;
+        var txt = document.createElement('span');
+        txt.className = 'memori-text';
+        txt.textContent = m.isi;
+        var del = document.createElement('button');
+        del.className = 'inline-btn memori-del';
+        del.type = 'button';
+        del.textContent = 'Hapus';
+        del.onclick = (function (id) {
+            return function () {
+                deleteMemoriEntry(id, function () { renderMemoriList(); });
+            };
+        })(m.id);
+        row.appendChild(tag);
+        row.appendChild(txt);
+        row.appendChild(del);
+        box.appendChild(row);
     });
 }
 
@@ -785,11 +987,14 @@ function setupEventListeners() {
         saveSettings(function (ok) {
             saveSettingsBtn.disabled = false;
             if (ok) {
-                showSettingsStatus('Tersimpan permanen. Aman ditutup.', 'success');
-                checkSystemHealth(false);
-                setTimeout(function () {
-                    document.getElementById('settingsModal').className = 'modal hidden';
-                }, 900);
+                // Simpan profil identitas juga (agar model mengenali pemilik)
+                saveProfil(function () {
+                    showSettingsStatus('Tersimpan permanen. Aman ditutup.', 'success');
+                    checkSystemHealth(false);
+                    setTimeout(function () {
+                        document.getElementById('settingsModal').className = 'modal hidden';
+                    }, 900);
+                });
             } else {
                 showSettingsStatus('Tersimpan lokal saja (server mati).', 'error');
             }
@@ -1542,8 +1747,13 @@ function sendBoundMessage(message) {
     // Gambar bisa dianalisis baik dengan OpenCode maupun mode proxy biasa
     // (LLM vision-capable mendukung input image-base64 / multimodal)
     
-    // System prompt with Python win32com cheat sheet
-    var systemPrompt = 
+    // System prompt with Python win32com cheat sheet.
+    // Profil pengguna + memori jangka panjang disuntik di depan
+    // agar model mengenali pemilik dan belajar dari sesi sebelumnya.
+    var systemPrompt =
+        buildProfilPrompt() +
+        buildMemoriPrompt() +
+        MEMORY_PROTOCOL +
         '### IDENTITAS ###\n' +
         'Anda adalah AI EXCEL AGENT yang TERPASANG DI MICROSOFT EXCEL.\n' +
         'Anda punya AKSES PENUH ke workbook target via Python win32com.client COM automation.\n' +
@@ -2308,6 +2518,22 @@ function handleAgentResponse(content, systemPrompt, contextMessage, liveMessage)
     expectingAnswer = false;
 
     var codeBlocks = extractCodeBlocks(content);
+
+    // Blok ```memory = agent menyimpan pelajaran ke memori jangka panjang.
+    // Disimpan ke server, BUKAN dieksekusi sebagai kode.
+    var memoryBlocks = extractMemoryBlocks(content);
+    if (memoryBlocks.length > 0) {
+        var savedCount = 0;
+        memoryBlocks.forEach(function (block, idx) {
+            saveMemoryBlock(block, function (ok) {
+                savedCount += 1;
+                if (ok) {
+                    addMessage('system', 'Dicatat di memori [' + block.kategori + ']: ' + block.isi);
+                }
+                if (savedCount >= memoryBlocks.length) renderMemoriList();
+            });
+        });
+    }
 
     chatHistory.push({ role: 'assistant', content: content });
 

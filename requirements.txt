@@ -1,1 +1,3 @@
-pywin32>=306
+# Dependensi Python dikunci ke versi pasti agar hasil instal SAMA di semua komputer.
+# Jangan pakai >= tanpa batas atas: versi baru bisa mengubah perilaku win32com.
+pywin32==312
