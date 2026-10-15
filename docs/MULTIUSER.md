@@ -31,8 +31,8 @@ Cocok untuk PC pribadi yang memang dipakai satu orang.
 
 - Server hanya mendengar di `127.0.0.1` (localhost): login hanya berlaku
   untuk pemakai komputer itu sendiri.
-- Token sesi acak 256-bit, kedaluwarsa 7 hari, disimpan di `sessionStorage`
-  (hilang saat Excel ditutup).
+- Token sesi acak 256-bit, kedaluwarsa 7 hari, disimpan di `localStorage`
+  (login tetap berlaku walau Excel ditutup; logout via badge user di header).
 - Semua endpoint `/api/*` (kecuali `/api/auth/*` dan health) menolak request
   tanpa token begitu multi-user aktif (HTTP 401 + `needLogin`).
 - File `users.json` diberi izin akses pemilik saja (chmod 600, best-effort).
