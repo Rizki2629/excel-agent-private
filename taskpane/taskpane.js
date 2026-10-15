@@ -446,11 +446,12 @@ function renderMemoriList() {
 }
 
 // ---- Auth multi-user ----
-// Token disimpan di sessionStorage (hilang saat Excel ditutup).
+// Token disimpan di localStorage: login tetap berlaku walau Excel ditutup.
+// Logout lewat badge user di header untuk mengakhiri sesi.
 // Header Authorization disuntik otomatis ke semua request /api/*.
 var authToken = null;
 var currentUsername = null;
-try { authToken = sessionStorage.getItem('excelAgentToken') || null; } catch (e) {}
+try { authToken = localStorage.getItem('excelAgentToken') || null; } catch (e) {}
 
 (function patchXhrAuth() {
     var origOpen = XMLHttpRequest.prototype.open;
@@ -540,7 +541,7 @@ function doLogin() {
             try {
                 var data = JSON.parse(xhr.responseText);
                 authToken = data.token;
-                try { sessionStorage.setItem('excelAgentToken', authToken); } catch (e) {}
+                try { localStorage.setItem('excelAgentToken', authToken); } catch (e) {}
                 document.getElementById('loginPassword').value = '';
                 hideLogin();
                 onLoggedIn(data.username);
@@ -569,7 +570,7 @@ function doLogout() {
     function done() {
         authToken = null;
         currentUsername = null;
-        try { sessionStorage.removeItem('excelAgentToken'); } catch (e) {}
+        try { localStorage.removeItem('excelAgentToken'); } catch (e) {}
         location.reload();
     }
     var xhr = new XMLHttpRequest();
@@ -601,7 +602,7 @@ function checkAuthStatus(done) {
             if (done) done(true);
         } else {
             authToken = null;
-            try { sessionStorage.removeItem('excelAgentToken'); } catch (e) {}
+            try { localStorage.removeItem('excelAgentToken'); } catch (e) {}
             showLogin(null, false);
             if (done) done(false);
         }
@@ -690,7 +691,7 @@ function activateMultiUser() {
             try {
                 var data = JSON.parse(xhr.responseText);
                 authToken = data.token;
-                try { sessionStorage.setItem('excelAgentToken', authToken); } catch (e) {}
+                try { localStorage.setItem('excelAgentToken', authToken); } catch (e) {}
                 location.reload();
             } catch (e) {
                 errBox.textContent = 'Respons server tidak valid.';
