@@ -406,50 +406,52 @@ function enqueueCom(work) {
     return queued.finally(() => { pendingCom -= 1; });
 }
 
-function readConfig() {
+function readConfig(username) {
     try {
-        const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
+        const raw = fs.readFileSync(configFileFor(username), 'utf8');
         return Object.assign({}, DEFAULT_CONFIG, JSON.parse(raw));
     } catch (e) {
         return Object.assign({}, DEFAULT_CONFIG);
     }
 }
 
-function writeConfig(partial) {
-    const merged = Object.assign(readConfig(), partial);
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2), 'utf8');
+function writeConfig(username, partial) {
+    const merged = Object.assign(readConfig(username), partial);
+    const file = configFileFor(username);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(merged, null, 2), 'utf8');
     // Batasi akses ke pemilik saja (best-effort; diabaikan bila FS tidak mendukung)
-    try { fs.chmodSync(CONFIG_FILE, 0o600); } catch (e) { }
+    try { fs.chmodSync(file, 0o600); } catch (e) { }
     return merged;
 }
 
 // ---- Profil identitas pengguna ----
-function readProfil() {
+function readProfil(username) {
     try {
-        const raw = fs.readFileSync(PROFIL_FILE, 'utf8');
+        const raw = fs.readFileSync(profilFileFor(username), 'utf8');
         return Object.assign({}, DEFAULT_PROFIL, JSON.parse(raw));
     } catch (e) {
         return Object.assign({}, DEFAULT_PROFIL);
     }
 }
 
-function writeProfil(partial) {
-    const merged = readProfil();
+function writeProfil(username, partial) {
+    const merged = readProfil(username);
     ['nama', 'peran', 'zonaWaktu', 'bahasa', 'gayaJawab'].forEach((k) => {
         if (typeof partial[k] === 'string' && partial[k].trim()) merged[k] = partial[k].trim().slice(0, 200);
     });
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(PROFIL_FILE, JSON.stringify(merged, null, 2), 'utf8');
+    const file = profilFileFor(username);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(merged, null, 2), 'utf8');
     return merged;
 }
 
 // ---- Memori jangka panjang ----
 const MEMORI_KATEGORI = ['preferensi', 'koreksi', 'pola', 'fakta'];
 
-function readMemori() {
+function readMemori(username) {
     try {
-        const raw = fs.readFileSync(MEMORI_FILE, 'utf8');
+        const raw = fs.readFileSync(memoriFileFor(username), 'utf8');
         const arr = JSON.parse(raw);
         return Array.isArray(arr) ? arr : [];
     } catch (e) {
@@ -457,19 +459,20 @@ function readMemori() {
     }
 }
 
-function writeMemori(list) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(MEMORI_FILE, JSON.stringify(list, null, 2), 'utf8');
+function writeMemori(username, list) {
+    const file = memoriFileFor(username);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(list, null, 2), 'utf8');
     return list;
 }
 
 // Tambah satu memori. Batas 200 entri, entri terlama dibuang bila penuh.
-function addMemori(kategori, isi) {
+function addMemori(username, kategori, isi) {
     const kat = MEMORI_KATEGORI.indexOf(kategori) !== -1 ? kategori : 'fakta';
     const teks = String(isi || '').trim().slice(0, 1000);
     if (!teks) { const e = new Error('Isi memori kosong.'); e.statusCode = 400; throw e; }
     // Tolak yang mirip dengan yang sudah ada (hindari duplikat)
-    const list = readMemori();
+    const list = readMemori(username);
     const norm = teks.toLowerCase();
     if (list.some((m) => m.isi && m.isi.toLowerCase() === norm)) {
         const e = new Error('Memori ini sudah tercatat.'); e.statusCode = 409; throw e;
@@ -481,13 +484,134 @@ function addMemori(kategori, isi) {
         isi: teks
     });
     while (list.length > 200) list.shift();
-    return writeMemori(list);
+    return writeMemori(username, list);
 }
 
-function deleteMemori(id) {
-    const list = readMemori().filter((m) => m.id !== id);
-    return writeMemori(list);
+function deleteMemori(username, id) {
+    const list = readMemori(username).filter((m) => m.id !== id);
+    return writeMemori(username, list);
 }
+
+// ======================================================================
+// Multi-user: akun login, sesi, dan isolasi data per pengguna.
+// Bila belum ada user terdaftar, server berjalan dalam "mode tunggal"
+// (perilaku lama, tanpa login) agar instalasi lama tidak rusak.
+// Begitu user pertama dibuat, semua /api/* mewajibkan token Bearer
+// dan config/profil/memori/history tersimpan per user.
+// ======================================================================
+const USERS_FILE = path.join(CONFIG_DIR, 'users.json');
+const SESSION_TTL_MS = 7 * 24 * 3600 * 1000;
+const sessions = new Map(); // token -> { username, expires }
+
+function sanitizeUsername(name) {
+    if (typeof name !== 'string') return '';
+    const t = name.trim().toLowerCase();
+    return /^[a-z0-9_-]{3,30}$/.test(t) ? t : '';
+}
+
+function readUsers() {
+    try {
+        const raw = fs.readFileSync(USERS_FILE, 'utf8');
+        const data = JSON.parse(raw);
+        return data && typeof data.users === 'object' && data.users ? data.users : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeUsers(users) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(USERS_FILE, JSON.stringify({ users }, null, 2), 'utf8');
+    try { fs.chmodSync(USERS_FILE, 0o600); } catch (e) { }
+}
+
+function multiUserEnabled() {
+    return Object.keys(readUsers()).length > 0;
+}
+
+function hashPassword(password, salt) {
+    return crypto.scryptSync(password, salt, 64).toString('hex');
+}
+
+// Pindahkan data lama (config/profil/memori di root) ke folder user pertama.
+function migrateLegacyData(username) {
+    const dir = userDir(username);
+    fs.mkdirSync(dir, { recursive: true });
+    [['config.json', CONFIG_FILE], ['profil.json', PROFIL_FILE], ['memori.json', MEMORI_FILE]].forEach(([name, src]) => {
+        const dest = path.join(dir, name);
+        try {
+            if (fs.existsSync(src) && !fs.existsSync(dest)) fs.renameSync(src, dest);
+        } catch (e) { /* abaikan */ }
+    });
+}
+
+function createUser(username, password) {
+    const clean = sanitizeUsername(username);
+    if (!clean) { const e = new Error('Username 3-30 karakter: huruf, angka, _ atau -.'); e.statusCode = 400; throw e; }
+    if (typeof password !== 'string' || password.length < 4) { const e = new Error('Password minimal 4 karakter.'); e.statusCode = 400; throw e; }
+    const users = readUsers();
+    if (users[clean]) { const e = new Error('Username sudah dipakai.'); e.statusCode = 409; throw e; }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const isFirst = Object.keys(users).length === 0;
+    users[clean] = { salt, hash: hashPassword(password, salt), created: new Date().toISOString() };
+    writeUsers(users);
+    if (isFirst) migrateLegacyData(clean);
+    return clean;
+}
+
+function verifyUser(username, password) {
+    const clean = sanitizeUsername(username);
+    const users = readUsers();
+    const u = clean && users[clean];
+    if (!u || typeof password !== 'string') return null;
+    try {
+        const hash = crypto.scryptSync(password, u.salt, 64).toString('hex');
+        if (crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(u.hash, 'hex'))) return clean;
+    } catch (e) { /* gagal verifikasi */ }
+    return null;
+}
+
+function changePassword(username, oldPassword, newPassword) {
+    const clean = verifyUser(username, oldPassword);
+    if (!clean) { const e = new Error('Password lama salah.'); e.statusCode = 401; throw e; }
+    if (typeof newPassword !== 'string' || newPassword.length < 4) { const e = new Error('Password baru minimal 4 karakter.'); e.statusCode = 400; throw e; }
+    const users = readUsers();
+    const salt = crypto.randomBytes(16).toString('hex');
+    users[clean] = { salt, hash: hashPassword(newPassword, salt), created: users[clean].created };
+    writeUsers(users);
+    return clean;
+}
+
+function createSession(username) {
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, { username, expires: Date.now() + SESSION_TTL_MS });
+    return token;
+}
+
+function getSessionUser(req) {
+    const h = (req.headers && req.headers.authorization) || '';
+    const m = /^Bearer ([0-9a-f]{64})$/i.exec(h.trim());
+    if (!m) return null;
+    const s = sessions.get(m[1].toLowerCase());
+    if (!s) return null;
+    if (s.expires < Date.now()) { sessions.delete(m[1].toLowerCase()); return null; }
+    return s.username;
+}
+
+function destroySession(req) {
+    const h = (req.headers && req.headers.authorization) || '';
+    const m = /^Bearer ([0-9a-f]{64})$/i.exec(h.trim());
+    if (m) sessions.delete(m[1].toLowerCase());
+}
+
+function userDir(username) {
+    return path.join(CONFIG_DIR, 'users', username);
+}
+
+// File data untuk user tertentu; username kosong/null = mode tunggal (path lama).
+function configFileFor(username) { return username ? path.join(userDir(username), 'config.json') : CONFIG_FILE; }
+function profilFileFor(username) { return username ? path.join(userDir(username), 'profil.json') : PROFIL_FILE; }
+function memoriFileFor(username) { return username ? path.join(userDir(username), 'memori.json') : MEMORI_FILE; }
 
 // Migrasi non-destruktif ke skema "model per provider".
 // Provider lama belum punya field `models`; diisi dari model aktifnya sendiri.
@@ -517,8 +641,8 @@ function cleanHistory(value) {
     return value.filter(item => item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string').slice(-50);
 }
 
-function readWorkbookHistory(workbookPath, workbookId) {
-    const config = readConfig();
+function readWorkbookHistory(workbookPath, workbookId, username) {
+    const config = readConfig(username);
     const histories = config.chatHistoryByWorkbook || {};
     const idKey = workbookIdKey(workbookId);
     if (idKey && histories[idKey]) return histories[idKey];
@@ -528,8 +652,8 @@ function readWorkbookHistory(workbookPath, workbookId) {
     return [];
 }
 
-function writeWorkbookHistory(workbookPath, history, workbookId) {
-    const config = readConfig();
+function writeWorkbookHistory(workbookPath, history, workbookId, username) {
+    const config = readConfig(username);
     const histories = Object.assign({}, config.chatHistoryByWorkbook || {});
     const cleaned = cleanHistory(history);
     const idKey = workbookIdKey(workbookId);
@@ -539,7 +663,7 @@ function writeWorkbookHistory(workbookPath, history, workbookId) {
     // Simpan di bawah ID bila ada, dan tautkan juga ke path untuk backward-compatibility.
     if (idKey) histories[idKey] = cleaned;
     if (pathKey) histories[pathKey] = cleaned;
-    writeConfig({ chatHistoryByWorkbook: histories });
+    writeConfig(username, { chatHistoryByWorkbook: histories });
     return cleaned;
 }
 
@@ -547,11 +671,11 @@ function resolveProxyApiKey(requestApiKey, storedApiKey) {
     return typeof requestApiKey === 'string' && requestApiKey.length > 0 ? requestApiKey : storedApiKey;
 }
 
-function deleteWorkbookHistory(workbookPath) {
-    const config = readConfig();
+function deleteWorkbookHistory(workbookPath, username) {
+    const config = readConfig(username);
     const histories = Object.assign({}, config.chatHistoryByWorkbook || {});
     delete histories[workbookHistoryKey(workbookPath)];
-    writeConfig({ chatHistoryByWorkbook: histories });
+    writeConfig(username, { chatHistoryByWorkbook: histories });
 }
 
 // ---- Provider profiles: simpan banyak set (endpoint+key+model), pilih untuk aktif ----
@@ -565,10 +689,10 @@ function sanitizeProviderName(name) {
 
 // Simpan/perbarui satu provider. Key hanya ditimpa bila incoming membawa key baru,
 // sehingga menyimpan ulang tanpa mengetik key tidak menghapus key lama.
-function saveProvider(name, data) {
+function saveProvider(name, data, username) {
     const cleanName = sanitizeProviderName(name);
     if (!cleanName) { const e = new Error('Nama provider tidak valid.'); e.statusCode = 400; throw e; }
-    const config = readConfig();
+    const config = readConfig(username);
     const providers = Object.assign({}, config.providers || {});
     const existing = providers[cleanName] || {};
     const entry = {
@@ -583,24 +707,24 @@ function saveProvider(name, data) {
     // Model aktif selalu ikut masuk daftar provider agar tidak hilang dari dropdown.
     if (entry.model && entry.models.indexOf(entry.model) === -1) entry.models.unshift(entry.model);
     providers[cleanName] = entry;
-    writeConfig({ providers });
+    writeConfig(username, { providers });
     return cleanName;
 }
 
-function deleteProvider(name) {
+function deleteProvider(name, username) {
     const cleanName = sanitizeProviderName(name);
-    const config = readConfig();
+    const config = readConfig(username);
     const providers = Object.assign({}, config.providers || {});
     delete providers[cleanName];
     const patch = { providers };
     if (config.activeProvider === cleanName) patch.activeProvider = '';
-    writeConfig(patch);
+    writeConfig(username, patch);
 }
 
 // Aktifkan provider: salin field-nya (termasuk key) ke setting aktif yang dipakai proxy.
-function activateProvider(name) {
+function activateProvider(name, username) {
     const cleanName = sanitizeProviderName(name);
-    const config = readConfig();
+    const config = readConfig(username);
     const providers = config.providers || {};
     const p = providers[cleanName];
     if (!p) { const e = new Error('Provider tidak ditemukan.'); e.statusCode = 404; throw e; }
@@ -612,7 +736,7 @@ function activateProvider(name) {
     if (p.opencodeModel) patch.opencodeModel = p.opencodeModel;
     if (p.useOpencode !== undefined) patch.useOpencode = p.useOpencode === true;
     if (typeof p.apiKey === 'string' && p.apiKey.length > 0) patch.apiKey = p.apiKey;
-    return writeConfig(patch);
+    return writeConfig(username, patch);
 }
 
 const MIME_TYPES = {
@@ -1058,10 +1182,27 @@ async function proxyToAPI(reqBody, res, readConfigFn = readConfig) {
 }
 
 function createRequestHandler(dependencies = {}) {
-    const readConfigForRequest = dependencies.readConfig || readConfig;
-    const writeConfigForRequest = dependencies.writeConfig || writeConfig;
     const execFileForRequest = dependencies.execFile || require('child_process').execFile;
     const proxyToAPIForRequest = dependencies.proxyToAPI || proxyToAPI;
+    // dependencies.auth === false mematikan penegakan login (untuk pengujian).
+    const authEnforced = dependencies.auth !== false;
+
+    // Closure data per-request: otomatis memakai data milik user yang login.
+    // requestUser = null di mode tunggal (belum ada user terdaftar) -> path lama.
+    // Fungsi yang di-inject via dependencies dipanggil dengan konvensi lama
+    // (tanpa username) agar mock pada test tidak berubah.
+    function requestScope(requestUser) {
+        const readConfigForRequest = dependencies.readConfig
+            ? () => dependencies.readConfig()
+            : () => readConfig(requestUser);
+        const writeConfigForRequest = dependencies.writeConfig
+            ? (partial) => dependencies.writeConfig(partial)
+            : (partial) => writeConfig(requestUser, partial);
+        const readProfilForRequest = () => readProfil(requestUser);
+        const writeProfilForRequest = (partial) => writeProfil(requestUser, partial);
+        const readMemoriForRequest = () => readMemori(requestUser);
+        const addMemoriForRequest = (kategori, isi) => addMemori(requestUser, kategori, isi);
+        const deleteMemoriForRequest = (id) => deleteMemori(requestUser, id);
 
     const readWorkbookHistoryForRequest = (workbookPath, workbookId) => {
         const config = readConfigForRequest();
@@ -1137,6 +1278,23 @@ function createRequestHandler(dependencies = {}) {
         return writeConfigForRequest(patch);
     };
 
+        return {
+            readConfigForRequest, writeConfigForRequest,
+            readProfilForRequest, writeProfilForRequest,
+            readMemoriForRequest, addMemoriForRequest, deleteMemoriForRequest,
+            readWorkbookHistoryForRequest, writeWorkbookHistoryForRequest, deleteWorkbookHistoryForRequest,
+            saveProviderForRequest, deleteProviderForRequest, activateProviderForRequest,
+        };
+    }
+
+    function json(res, statusCode, obj) {
+        res.writeHead(statusCode, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': ALLOWED_ORIGIN
+        });
+        res.end(JSON.stringify(obj));
+    }
+
     return async (req, res) => {
         const origin = req.headers.origin;
         if (req.url.startsWith('/api/') && !isAllowedOrigin(origin)) {
@@ -1155,6 +1313,106 @@ function createRequestHandler(dependencies = {}) {
             res.end();
             return;
         }
+
+        // ---- Auth endpoints (tidak butuh token) ----
+        if (req.url === '/api/auth/status' && req.method === 'GET') {
+            const requestUser = getSessionUser(req);
+            json(res, 200, {
+                ok: true,
+                multiUser: multiUserEnabled(),
+                loggedIn: !!requestUser,
+                username: requestUser || null
+            });
+            return;
+        }
+        if (req.url === '/api/auth/setup' && req.method === 'POST') {
+            try {
+                if (multiUserEnabled()) { const e = new Error('Setup sudah dilakukan.'); e.statusCode = 403; throw e; }
+                const incoming = JSON.parse(await readBody(req));
+                const username = createUser(incoming.username, incoming.password);
+                const token = createSession(username);
+                json(res, 200, { ok: true, username, token });
+            } catch (e) {
+                json(res, e.statusCode || 400, { ok: false, error: e.message });
+            }
+            return;
+        }
+        if (req.url === '/api/auth/login' && req.method === 'POST') {
+            try {
+                const incoming = JSON.parse(await readBody(req));
+                const username = verifyUser(incoming.username, incoming.password);
+                if (!username) { const e = new Error('Username atau password salah.'); e.statusCode = 401; throw e; }
+                const token = createSession(username);
+                json(res, 200, { ok: true, username, token });
+            } catch (e) {
+                json(res, e.statusCode || 400, { ok: false, error: e.message });
+            }
+            return;
+        }
+        if (req.url === '/api/auth/logout' && req.method === 'POST') {
+            destroySession(req);
+            json(res, 200, { ok: true });
+            return;
+        }
+        if (req.url === '/api/auth/change-password' && req.method === 'POST') {
+            try {
+                const requestUser = getSessionUser(req);
+                if (!requestUser) { const e = new Error('Belum login.'); e.statusCode = 401; throw e; }
+                const incoming = JSON.parse(await readBody(req));
+                changePassword(requestUser, incoming.oldPassword, incoming.newPassword);
+                json(res, 200, { ok: true });
+            } catch (e) {
+                json(res, e.statusCode || 400, { ok: false, error: e.message });
+            }
+            return;
+        }
+        // Daftar user (butuh login)
+        if (req.url === '/api/auth/users' && req.method === 'GET') {
+            try {
+                const requestUser = getSessionUser(req);
+                if (!requestUser) { const e = new Error('Belum login.'); e.statusCode = 401; throw e; }
+                const users = readUsers();
+                const list = Object.keys(users).map((u) => ({ username: u, created: users[u].created || null }));
+                json(res, 200, { ok: true, users: list });
+            } catch (e) {
+                json(res, e.statusCode || 400, { ok: false, error: e.message });
+            }
+            return;
+        }
+        // Tambah user baru (butuh login)
+        if (req.url === '/api/auth/users' && req.method === 'POST') {
+            try {
+                const requestUser = getSessionUser(req);
+                if (!requestUser) { const e = new Error('Belum login.'); e.statusCode = 401; throw e; }
+                const incoming = JSON.parse(await readBody(req));
+                const username = createUser(incoming.username, incoming.password);
+                json(res, 200, { ok: true, username });
+            } catch (e) {
+                json(res, e.statusCode || 400, { ok: false, error: e.message });
+            }
+            return;
+        }
+
+        // ---- Penegakan login ----
+        // Bila sudah ada user terdaftar, semua /api/* (selain /api/auth/*)
+        // mewajibkan token Bearer. Mode tunggal (belum ada user) tetap bebas
+        // agar instalasi lama tidak rusak.
+        let requestUser = null;
+        if (authEnforced && multiUserEnabled() && req.url.startsWith('/api/')) {
+            requestUser = getSessionUser(req);
+            if (!requestUser) {
+                json(res, 401, { ok: false, error: 'Belum login. Silakan login dulu.', needLogin: true });
+                return;
+            }
+        }
+
+        const {
+            readConfigForRequest, writeConfigForRequest,
+            readProfilForRequest, writeProfilForRequest,
+            readMemoriForRequest, addMemoriForRequest, deleteMemoriForRequest,
+            readWorkbookHistoryForRequest, writeWorkbookHistoryForRequest, deleteWorkbookHistoryForRequest,
+            saveProviderForRequest, deleteProviderForRequest, activateProviderForRequest,
+        } = requestScope(requestUser);
 
         // Health Check: cek server, AI router/gateway, dan Python win32com
         if (req.url === '/api/health' && req.method === 'GET') {
@@ -1248,7 +1506,7 @@ function createRequestHandler(dependencies = {}) {
                 'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
                 'Cache-Control': 'no-store'
             });
-            res.end(JSON.stringify({ ok: true, profil: readProfil() }));
+            res.end(JSON.stringify({ ok: true, profil: readProfilForRequest(), username: requestUser || null }));
             return;
         }
 
@@ -1256,7 +1514,7 @@ function createRequestHandler(dependencies = {}) {
         if (req.url === '/api/profil' && req.method === 'POST') {
             try {
                 const incoming = JSON.parse(await readBody(req));
-                const saved = writeProfil(incoming || {});
+                const saved = writeProfilForRequest(incoming || {});
                 res.writeHead(200, {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': ALLOWED_ORIGIN
@@ -1276,7 +1534,7 @@ function createRequestHandler(dependencies = {}) {
                 'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
                 'Cache-Control': 'no-store'
             });
-            res.end(JSON.stringify({ ok: true, memori: readMemori() }));
+            res.end(JSON.stringify({ ok: true, memori: readMemoriForRequest() }));
             return;
         }
 
@@ -1289,7 +1547,7 @@ function createRequestHandler(dependencies = {}) {
                     const e = new Error('Ditolak: jangan simpan kredensial ke memori.');
                     e.statusCode = 400; throw e;
                 }
-                const list = addMemori(incoming.kategori, incoming.isi);
+                const list = addMemoriForRequest(incoming.kategori, incoming.isi);
                 res.writeHead(200, {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': ALLOWED_ORIGIN
@@ -1306,7 +1564,7 @@ function createRequestHandler(dependencies = {}) {
         if (req.url === '/api/memori' && req.method === 'DELETE') {
             try {
                 const incoming = JSON.parse(await readBody(req));
-                const list = deleteMemori(incoming.id);
+                const list = deleteMemoriForRequest(incoming.id);
                 res.writeHead(200, {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': ALLOWED_ORIGIN
@@ -1917,10 +2175,21 @@ function createRequestHandler(dependencies = {}) {
 
 async function start() {
     // Migrasi skema model-per-provider (aman diulang, tidak menghapus data lama).
+    // Dijalankan untuk mode tunggal dan untuk setiap user terdaftar.
     try {
-        const result = migrateProviderModels();
-        if (result.migrated) {
-            console.log(`Migrasi: ${result.migrated} provider kini punya daftar model sendiri (modelList global tetap disimpan).`);
+        const targets = [null];
+        if (multiUserEnabled()) {
+            Object.keys(readUsers()).forEach((u) => targets.push(u));
+        }
+        let totalMigrated = 0;
+        targets.forEach((u) => {
+            try {
+                const result = migrateProviderModels(() => readConfig(u), (p) => writeConfig(u, p));
+                totalMigrated += result.migrated || 0;
+            } catch (e) { /* lanjut user berikutnya */ }
+        });
+        if (totalMigrated) {
+            console.log(`Migrasi: ${totalMigrated} provider kini punya daftar model sendiri (modelList global tetap disimpan).`);
         }
     } catch (e) {
         console.error('Migrasi daftar model per provider dilewati:', e.message);
@@ -1995,6 +2264,16 @@ module.exports = {
   addMemori,
   deleteMemori,
   MEMORI_KATEGORI,
+  sanitizeUsername,
+  readUsers,
+  createUser,
+  verifyUser,
+  changePassword,
+  createSession,
+  getSessionUser,
+  destroySession,
+  multiUserEnabled,
+  userDir,
 };
 
 if (require.main === module) {

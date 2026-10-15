@@ -12,6 +12,27 @@
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 </head>
 <body>
+    <!-- Layar login multi-user. Muncul bila server sudah punya user terdaftar
+         dan sesi ini belum login. Token disimpan di sessionStorage. -->
+    <div id="loginOverlay" class="login-overlay hidden">
+        <div class="login-card">
+            <h2>Excel Agent</h2>
+            <p id="loginSubtitle" class="login-subtitle">Login untuk memakai asisten AI.</p>
+            <div class="form-group">
+                <label for="loginUsername">Username</label>
+                <input type="text" id="loginUsername" autocomplete="username" placeholder="username">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">Password</label>
+                <input type="password" id="loginPassword" autocomplete="current-password" placeholder="password">
+            </div>
+            <div id="loginError" class="login-error hidden"></div>
+            <div class="btn-row">
+                <button id="loginBtn" class="primary-btn" type="button">Login</button>
+            </div>
+            <p class="login-hint">Username 3-30 karakter: huruf kecil, angka, _ atau -.</p>
+        </div>
+    </div>
     <div class="container">
         <!-- Header kompak: logo kecil + badge koneksi -->
         <div class="header">
@@ -62,6 +83,10 @@
                     </div>
                 </div>
             </div>
+            <button id="userBadge" class="user-badge hidden" type="button" title="Klik untuk logout">
+                <span id="userBadgeName" class="user-badge-name"></span>
+                <span class="user-badge-x" aria-hidden="true">&times;</span>
+            </button>
         </div>
 
         <!-- Tab bar: fitur dikelompokkan -->
@@ -297,6 +322,43 @@
                     <label class="section-title">Memori Jangka Panjang</label>
                     <span class="field-hint">Agent belajar dari koreksi dan kebiasaanmu. Bilang "ingat ini" saat chat untuk mencatat.</span>
                     <div id="memoriList" class="memori-list"></div>
+                </div>
+                <div class="form-group settings-section" id="authSection">
+                    <label class="section-title">Multi-user</label>
+                    <div id="authActivateBox">
+                        <span class="field-hint">Belum ada akun. Buat akun pertama untuk mengaktifkan login multi-user (identitas dan memori jadi milik masing-masing).</span>
+                        <label for="authNewUsername" style="margin-top:6px;">Username</label>
+                        <input type="text" id="authNewUsername" placeholder="mis. rizki">
+                        <label for="authNewPassword" style="margin-top:6px;">Password</label>
+                        <input type="password" id="authNewPassword" placeholder="minimal 4 karakter">
+                        <div id="authActivateError" class="login-error hidden" style="margin-top:8px;"></div>
+                        <div class="btn-row" style="margin-top:8px;">
+                            <button id="authActivateBtn" class="secondary-btn" type="button">Aktifkan Multi-user</button>
+                        </div>
+                    </div>
+                    <div id="authManageBox" class="hidden">
+                        <span class="field-hint" id="authCurrentUser"></span>
+                        <label class="section-title" style="margin-top:10px; font-size:12px;">Daftar user</label>
+                        <div id="userList" class="memori-list"></div>
+                        <label class="section-title" style="margin-top:10px; font-size:12px;">Tambah user</label>
+                        <label for="authAddUsername" style="margin-top:6px;">Username</label>
+                        <input type="text" id="authAddUsername" placeholder="username baru">
+                        <label for="authAddPassword" style="margin-top:6px;">Password</label>
+                        <input type="password" id="authAddPassword" placeholder="minimal 4 karakter">
+                        <div id="authAddError" class="login-error hidden" style="margin-top:8px;"></div>
+                        <div class="btn-row" style="margin-top:8px;">
+                            <button id="authAddUserBtn" class="secondary-btn" type="button">Tambah User</button>
+                        </div>
+                        <label class="section-title" style="margin-top:10px; font-size:12px;">Ganti password saya</label>
+                        <label for="authOldPassword" style="margin-top:6px;">Password lama</label>
+                        <input type="password" id="authOldPassword">
+                        <label for="authNewPassword2" style="margin-top:6px;">Password baru</label>
+                        <input type="password" id="authNewPassword2" placeholder="minimal 4 karakter">
+                        <div id="authPwError" class="login-error hidden" style="margin-top:8px;"></div>
+                        <div class="btn-row" style="margin-top:8px;">
+                            <button id="authChangePwBtn" class="secondary-btn" type="button">Ganti Password</button>
+                        </div>
+                    </div>
                 </div>
                 <div id="settingsStatus" class="settings-status hidden"></div>
                 <div class="btn-row">

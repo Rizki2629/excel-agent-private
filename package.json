@@ -10,7 +10,7 @@
     "validate": "office-addin-manifest validate manifest.xml",
     "sideload": "office-addin-debugging start manifest.xml desktop --app excel",
     "stop": "office-addin-debugging stop manifest.xml",
-    "test": "node --test tests/server.test.js tests/taskpane.test.js tests/anthropic.test.js tests/provider_models.test.js tests/cancel.test.js tests/workbook_id_history.test.js tests/profil_memori.test.js && python -m unittest discover -s tests -p \"test_*.py\" -v"
+    "test": "node --test tests/server.test.js tests/taskpane.test.js tests/anthropic.test.js tests/provider_models.test.js tests/cancel.test.js tests/workbook_id_history.test.js tests/profil_memori.test.js tests/auth.test.js && python -m unittest discover -s tests -p \"test_*.py\" -v"
   },
   "dependencies": {
     "js-yaml": "^4.3.2",

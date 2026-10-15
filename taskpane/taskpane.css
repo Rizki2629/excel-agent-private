@@ -1519,3 +1519,72 @@ body {
 .memori-del {
     flex-shrink: 0;
 }
+
+/* ---- Login multi-user ---- */
+.login-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: var(--bg, #ffffff);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.login-overlay.hidden { display: none; }
+.login-card {
+    width: 100%;
+    max-width: 300px;
+}
+.login-card h2 {
+    margin: 0 0 4px 0;
+    font-size: 20px;
+}
+.login-subtitle {
+    font-size: 12px;
+    color: var(--text-faint);
+    margin: 0 0 14px 0;
+    line-height: 1.5;
+}
+.login-error {
+    font-size: 12px;
+    color: #b91c1c;
+    background: #fee2e2;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    line-height: 1.4;
+}
+.login-error.hidden { display: none; }
+.login-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 10px;
+    line-height: 1.5;
+}
+/* ---- Badge user di header ---- */
+.user-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border, #e5e5e5);
+    background: var(--bg-soft, #f7f7f7);
+    border-radius: 20px;
+    padding: 4px 6px 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    max-width: 140px;
+}
+.user-badge.hidden { display: none; }
+.user-badge-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.user-badge-x {
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0.6;
+}
+.user-badge:hover .user-badge-x { opacity: 1; }

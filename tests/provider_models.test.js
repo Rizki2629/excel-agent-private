@@ -265,7 +265,7 @@ test('taskpane menampilkan model hanya dari provider aktif', () => {
 
 test('server menjalankan migrasi model-per-provider saat start', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(source, /migrateProviderModels\(\)/);
+  assert.match(source, /migrateProviderModels\(/);
   // modelList global tidak pernah dihapus dari config
   assert.doesNotMatch(source, /delete\s+\w*[Cc]onfig\.modelList/);
 });

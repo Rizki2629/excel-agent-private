@@ -121,15 +121,20 @@ function initApp() {
     setupEventListeners();
     startHealthPolling();
     bindTaskPane(function (bound) {
-        loadSettings(function () {
-            if (bound) {
-                loadHistory(function () { restoreHistory(); });
-            }
-        });
-        // Profil identitas + memori: agar model mengenali pemilik sejak awal
-        loadProfilMemori(function () {
-            fillProfilForm();
-            renderMemoriList();
+        // Auth dulu: bila multi-user aktif dan belum login, tampilkan layar
+        // login dan tunda pemuatan data sampai user login.
+        checkAuthStatus(function (authed) {
+            if (!authed) return;
+            loadSettings(function () {
+                if (bound) {
+                    loadHistory(function () { restoreHistory(); });
+                }
+            });
+            // Profil identitas + memori: agar model mengenali pemilik sejak awal
+            loadProfilMemori(function () {
+                fillProfilForm();
+                renderMemoriList();
+            });
         });
     });
 }
@@ -438,6 +443,329 @@ function renderMemoriList() {
         row.appendChild(del);
         box.appendChild(row);
     });
+}
+
+// ---- Auth multi-user ----
+// Token disimpan di sessionStorage (hilang saat Excel ditutup).
+// Header Authorization disuntik otomatis ke semua request /api/*.
+var authToken = null;
+var currentUsername = null;
+try { authToken = sessionStorage.getItem('excelAgentToken') || null; } catch (e) {}
+
+(function patchXhrAuth() {
+    var origOpen = XMLHttpRequest.prototype.open;
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url) {
+        this._eaUrl = url;
+        return origOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function (body) {
+        try {
+            if (authToken && typeof this._eaUrl === 'string' && this._eaUrl.indexOf('/api/') !== -1) {
+                this.setRequestHeader('Authorization', 'Bearer ' + authToken);
+            }
+        } catch (e) { /* abaikan */ }
+        var xhr = this;
+        var prevHandler = this.onreadystatechange;
+        this.onreadystatechange = function () {
+            try {
+                if (xhr.readyState === 4 && xhr.status === 401 &&
+                    typeof xhr.responseText === 'string' && xhr.responseText.indexOf('needLogin') !== -1) {
+                    showLogin('Sesi berakhir. Silakan login lagi.', false);
+                }
+            } catch (e) {}
+            if (prevHandler) return prevHandler.apply(this, arguments);
+        };
+        return origSend.call(this, body);
+    };
+})();
+
+function showLogin(message, setupMode) {
+    var overlay = document.getElementById('loginOverlay');
+    if (!overlay) return;
+    var subtitle = document.getElementById('loginSubtitle');
+    var errBox = document.getElementById('loginError');
+    var btn = document.getElementById('loginBtn');
+    if (setupMode) {
+        subtitle.textContent = 'Belum ada akun. Buat akun pertama untuk mengaktifkan mode multi-user.';
+        btn.textContent = 'Buat Akun';
+    } else {
+        subtitle.textContent = 'Login untuk memakai asisten AI.';
+        btn.textContent = 'Login';
+    }
+    overlay.dataset.setupMode = setupMode ? '1' : '';
+    if (message) {
+        errBox.textContent = message;
+        errBox.className = 'login-error';
+    } else {
+        errBox.className = 'login-error hidden';
+    }
+    overlay.className = 'login-overlay';
+}
+
+function hideLogin() {
+    var overlay = document.getElementById('loginOverlay');
+    if (overlay) overlay.className = 'login-overlay hidden';
+}
+
+function onLoggedIn(username) {
+    currentUsername = username;
+    var badge = document.getElementById('userBadge');
+    var nameEl = document.getElementById('userBadgeName');
+    if (badge && nameEl) {
+        nameEl.textContent = username;
+        badge.className = 'user-badge';
+    }
+}
+
+function doLogin() {
+    var username = document.getElementById('loginUsername').value.trim();
+    var password = document.getElementById('loginPassword').value;
+    var errBox = document.getElementById('loginError');
+    var setupMode = document.getElementById('loginOverlay').dataset.setupMode === '1';
+    var btn = document.getElementById('loginBtn');
+    if (!username || !password) {
+        errBox.textContent = 'Isi username dan password.';
+        errBox.className = 'login-error';
+        return;
+    }
+    btn.disabled = true;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + (setupMode ? '/api/auth/setup' : '/api/auth/login'), true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        btn.disabled = false;
+        if (xhr.status === 200) {
+            try {
+                var data = JSON.parse(xhr.responseText);
+                authToken = data.token;
+                try { sessionStorage.setItem('excelAgentToken', authToken); } catch (e) {}
+                document.getElementById('loginPassword').value = '';
+                hideLogin();
+                onLoggedIn(data.username);
+                // Muat ulang agar seluruh state (settings, profil, memori) milik user ini
+                location.reload();
+            } catch (e) {
+                errBox.textContent = 'Respons server tidak valid.';
+                errBox.className = 'login-error';
+            }
+        } else {
+            var msg = 'Login gagal.';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            errBox.textContent = msg;
+            errBox.className = 'login-error';
+        }
+    };
+    xhr.onerror = function () {
+        btn.disabled = false;
+        errBox.textContent = 'Tidak bisa menghubungi server. Pastikan server jalan.';
+        errBox.className = 'login-error';
+    };
+    xhr.send(JSON.stringify({ username: username, password: password }));
+}
+
+function doLogout() {
+    function done() {
+        authToken = null;
+        currentUsername = null;
+        try { sessionStorage.removeItem('excelAgentToken'); } catch (e) {}
+        location.reload();
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + '/api/auth/logout', true);
+    xhr.onreadystatechange = function () { if (xhr.readyState === 4) done(); };
+    xhr.onerror = done;
+    xhr.send();
+}
+
+function checkAuthStatus(done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', SERVER + '/api/auth/status', true);
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        var st = null;
+        if (xhr.status === 200) {
+            try { st = JSON.parse(xhr.responseText); } catch (e) {}
+        }
+        if (!st) { if (done) done(false); return; } // server mati / tak dikenal
+        if (!st.multiUser) {
+            // Mode tunggal: jalan seperti biasa tanpa login (kompatibel ke belakang)
+            hideLogin();
+            if (done) done(true);
+            return;
+        }
+        if (st.loggedIn && st.username) {
+            hideLogin();
+            onLoggedIn(st.username);
+            if (done) done(true);
+        } else {
+            authToken = null;
+            try { sessionStorage.removeItem('excelAgentToken'); } catch (e) {}
+            showLogin(null, false);
+            if (done) done(false);
+        }
+    };
+    xhr.onerror = function () { if (done) done(false); };
+    xhr.send();
+}
+
+// ---- Kelola user (di Pengaturan, bila multi-user aktif) ----
+function loadUserList() {
+    var box = document.getElementById('userList');
+    if (!box) return;
+    box.innerHTML = '<div class="memori-empty">Memuat...</div>';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', SERVER + '/api/auth/users', true);
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status !== 200) {
+            box.innerHTML = '<div class="memori-empty">Gagal memuat daftar user.</div>';
+            return;
+        }
+        try {
+            var users = JSON.parse(xhr.responseText).users || [];
+            box.innerHTML = '';
+            if (!users.length) {
+                box.innerHTML = '<div class="memori-empty">Belum ada user.</div>';
+                return;
+            }
+            users.forEach(function (u) {
+                var row = document.createElement('div');
+                row.className = 'memori-row';
+                var txt = document.createElement('span');
+                txt.className = 'memori-text';
+                txt.textContent = u.username + (u.username === currentUsername ? ' (kamu)' : '');
+                row.appendChild(txt);
+                box.appendChild(row);
+            });
+        } catch (e) {
+            box.innerHTML = '<div class="memori-empty">Gagal memuat daftar user.</div>';
+        }
+    };
+    xhr.send();
+}
+
+function renderAuthSection() {
+    var section = document.getElementById('authSection');
+    if (!section) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', SERVER + '/api/auth/status', true);
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        var st = null;
+        if (xhr.status === 200) { try { st = JSON.parse(xhr.responseText); } catch (e) {} }
+        var activateBox = document.getElementById('authActivateBox');
+        var manageBox = document.getElementById('authManageBox');
+        if (!st) return;
+        if (!st.multiUser) {
+            activateBox.className = '';
+            manageBox.className = 'hidden';
+        } else {
+            activateBox.className = 'hidden';
+            manageBox.className = '';
+            var whoEl = document.getElementById('authCurrentUser');
+            if (whoEl) whoEl.textContent = st.username ? 'Login sebagai: ' + st.username : '';
+            loadUserList();
+        }
+    };
+    xhr.send();
+}
+
+function activateMultiUser() {
+    var username = document.getElementById('authNewUsername').value.trim();
+    var password = document.getElementById('authNewPassword').value;
+    var errBox = document.getElementById('authActivateError');
+    if (!username || !password) {
+        errBox.textContent = 'Isi username dan password.';
+        errBox.className = 'login-error';
+        return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + '/api/auth/setup', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+            try {
+                var data = JSON.parse(xhr.responseText);
+                authToken = data.token;
+                try { sessionStorage.setItem('excelAgentToken', authToken); } catch (e) {}
+                location.reload();
+            } catch (e) {
+                errBox.textContent = 'Respons server tidak valid.';
+                errBox.className = 'login-error';
+            }
+        } else {
+            var msg = 'Gagal mengaktifkan.';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            errBox.textContent = msg;
+            errBox.className = 'login-error';
+        }
+    };
+    xhr.send(JSON.stringify({ username: username, password: password }));
+}
+
+function addNewUser() {
+    var username = document.getElementById('authAddUsername').value.trim();
+    var password = document.getElementById('authAddPassword').value;
+    var errBox = document.getElementById('authAddError');
+    if (!username || !password) {
+        errBox.textContent = 'Isi username dan password.';
+        errBox.className = 'login-error';
+        return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + '/api/auth/users', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+            document.getElementById('authAddUsername').value = '';
+            document.getElementById('authAddPassword').value = '';
+            errBox.className = 'login-error hidden';
+            loadUserList();
+        } else {
+            var msg = 'Gagal menambah user.';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            errBox.textContent = msg;
+            errBox.className = 'login-error';
+        }
+    };
+    xhr.send(JSON.stringify({ username: username, password: password }));
+}
+
+function changeOwnPassword() {
+    var oldPassword = document.getElementById('authOldPassword').value;
+    var newPassword = document.getElementById('authNewPassword2').value;
+    var errBox = document.getElementById('authPwError');
+    if (!oldPassword || !newPassword) {
+        errBox.textContent = 'Isi password lama dan baru.';
+        errBox.className = 'login-error';
+        return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER + '/api/auth/change-password', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+            document.getElementById('authOldPassword').value = '';
+            document.getElementById('authNewPassword2').value = '';
+            errBox.textContent = 'Password berhasil diganti.';
+            errBox.className = 'login-error';
+            errBox.style.color = '#15803d';
+            errBox.style.background = '#dcfce7';
+        } else {
+            var msg = 'Gagal ganti password.';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            errBox.textContent = msg;
+            errBox.className = 'login-error';
+            errBox.style.color = '';
+            errBox.style.background = '';
+        }
+    };
+    xhr.send(JSON.stringify({ oldPassword: oldPassword, newPassword: newPassword }));
 }
 
 function normalizeFileUrl(url) {
@@ -824,6 +1152,9 @@ function setupEventListeners() {
         populateProviderDropdown();
         populateModelDatalist(Array.isArray(settings.modelList) ? settings.modelList : []);
         hideSettingsStatus();
+        fillProfilForm();
+        renderMemoriList();
+        renderAuthSection();
     };
 
     // ---- API Key show/hide toggle ----
@@ -973,6 +1304,30 @@ function setupEventListeners() {
     closeSettingsBtn.onclick = function () {
         document.getElementById('settingsModal').className = 'modal hidden';
     };
+
+    // ---- Auth multi-user ----
+    var loginBtn = document.getElementById('loginBtn');
+    if (loginBtn) {
+        loginBtn.onclick = doLogin;
+        document.getElementById('loginPassword').onkeydown = function (e) {
+            if (e.key === 'Enter') doLogin();
+        };
+        document.getElementById('loginUsername').onkeydown = function (e) {
+            if (e.key === 'Enter') doLogin();
+        };
+    }
+    var userBadge = document.getElementById('userBadge');
+    if (userBadge) {
+        userBadge.onclick = function () {
+            if (confirm('Logout dari akun ' + (currentUsername || '') + '?')) doLogout();
+        };
+    }
+    var authActivateBtn = document.getElementById('authActivateBtn');
+    if (authActivateBtn) authActivateBtn.onclick = activateMultiUser;
+    var authAddUserBtn = document.getElementById('authAddUserBtn');
+    if (authAddUserBtn) authAddUserBtn.onclick = addNewUser;
+    var authChangePwBtn = document.getElementById('authChangePwBtn');
+    if (authChangePwBtn) authChangePwBtn.onclick = changeOwnPassword;
 
     saveSettingsBtn.onclick = function () {
         var newApiKey = document.getElementById('apiKey').value.trim();
