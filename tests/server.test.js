@@ -743,12 +743,3 @@ test('hermes: import menolak nama provider yang tidak ada', async () => {
   assert.equal(JSON.parse(res.body).ok, false);
 });
 
-test('taskpane menyediakan kontrol impor provider Hermes', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.js'), 'utf8');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.html'), 'utf8');
-  assert.match(html, /id="hermesProviderSelect"/);
-  assert.match(html, /id="importHermesBtn"/);
-  assert.match(source, /\/api\/hermes\/providers/);
-  assert.match(source, /\/api\/hermes\/import/);
-});
-

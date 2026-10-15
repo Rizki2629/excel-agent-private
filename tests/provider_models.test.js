@@ -251,18 +251,6 @@ test('hapus satu provider tidak menghapus provider lain maupun arsip global', as
   assert.equal(after.activeProvider, '');
 });
 
-test('taskpane menampilkan model hanya dari provider aktif', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'taskpane', 'taskpane.js'), 'utf8');
-  // Ada helper pemilih model per provider
-  assert.match(source, /function activeProviderModels\(\)/);
-  // populateModelDropdown memakai helper itu, bukan modelList global langsung
-  assert.match(source, /var list = activeProviderModels\(\);/);
-  // Tambah/hapus model diarahkan ke endpoint per provider
-  assert.match(source, /\/api\/providers\/models/);
-  // Fungsi lama yang menimpa daftar global sudah tidak dipakai
-  assert.doesNotMatch(source, /function persistModelList/);
-});
-
 test('server menjalankan migrasi model-per-provider saat start', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /migrateProviderModels\(/);

@@ -27,12 +27,13 @@ sehingga agent makin pintar tanpa perlu dilatih ulang.
 1. **Otomatis oleh agent.** Jika kamu bilang "ingat ini", "catat", "jangan lupa",
    atau mengoreksi agent ("bukan begitu, yang benar..."), agent menyimpan
    pelajarannya sendiri lewat blok ` ```memory ` pada jawabannya:
-   ```
+
+   ````
    ```memory
    kategori: preferensi
    isi: Format tanggal di daftar hadir selalu DD-MM-YYYY.
    ```
-   ```
+   ````
    Kategori: `preferensi`, `koreksi`, `pola`, `fakta`.
 2. **Manual.** Di Pengaturan ada daftar memori; entri bisa dihapus satu per satu.
 3. **API.** `GET /api/memori`, `POST /api/memori` (`{kategori, isi}`),
