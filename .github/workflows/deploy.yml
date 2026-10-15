@@ -1,0 +1,29 @@
+name: Deploy ke PC 24 jam
+
+# Setiap push ke master: pull otomatis, jalanin test, restart server.
+# Berjalan di self-hosted runner yang terpasang di PC 24 jam milik sendiri.
+# Repo ini private, jadi runner aman dari workflow orang asing.
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Jalankan test (JS + Python)
+        run: npm test
+
+      - name: Restart server via PM2
+        run: |
+          pm2 restart excel-agent --update-env || pm2 start server.js --name excel-agent --update-env
+          pm2 save
