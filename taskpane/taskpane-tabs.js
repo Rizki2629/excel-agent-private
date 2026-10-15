@@ -1,13 +1,13 @@
 // ==========================================================================
 // UI TAB v1.7.0 "Chat-first" (Okt 2026)
-// Chat jadi elemen utama; fitur dikelompokkan: Chat | Cepat | Gambar | Pengaturan.
+// Chat jadi elemen utama; fitur dikelompokkan: Chat | Gambar | Pengaturan.
 // File terpisah — tidak mengubah satu baris pun taskpane.js.
 // Sintaks ES5 (kompatibel IE11).
 // ==========================================================================
 
-var EA_TABS = ['chat', 'cepat', 'gambar', 'pengaturan'];
+var EA_TABS = ['chat', 'gambar', 'pengaturan'];
 
-// Pindah tab aktif. Dipanggil dari klik tab maupun aksi (kartu cepat, lampir gambar).
+// Pindah tab aktif. Dipanggil dari klik tab maupun aksi (lampir gambar).
 function eaSwitchTab(name) {
     var i, panel, btn;
     for (i = 0; i < EA_TABS.length; i++) {
@@ -77,24 +77,6 @@ function eaSetupTabs() {
             var hiddenBtn = document.getElementById('settingsBtn');
             if (hiddenBtn) hiddenBtn.click();
         };
-    }
-
-    // Kartu aksi di tab Cepat: setelah prompt dikirim (handler lama),
-    // pindahkan tampilan ke tab Chat agar user melihat prosesnya.
-    // Dipasang di fase bubble pada panel, jadi jalan SETELAH onclick kartu.
-    var cepatPanel = document.getElementById('tab-cepat');
-    if (cepatPanel && cepatPanel.addEventListener) {
-        cepatPanel.addEventListener('click', function (e) {
-            var t = e.target || e.srcElement;
-            while (t && t !== cepatPanel) {
-                var cls = t.className || '';
-                if (typeof cls === 'string' && cls.indexOf('example-card') !== -1) {
-                    eaSwitchTab('chat');
-                    break;
-                }
-                t = t.parentNode;
-            }
-        });
     }
 }
 
